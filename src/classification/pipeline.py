@@ -9,6 +9,15 @@ def _flatten_images(images: np.ndarray) -> np.ndarray:
     return images.reshape(images.shape[0], -1).astype(np.float32)
 
 
+def _apply_standardization(
+    features: np.ndarray,
+    mean: np.ndarray,
+    std: np.ndarray,
+) -> np.ndarray:
+    standardized = (features - mean) / std
+    return np.clip(standardized, -4.0, 4.0).astype(np.float32)
+
+
 def _denoise_and_flatten_in_batches(
     denoiser_model,
     noisy_images: np.ndarray,
@@ -62,6 +71,13 @@ def run_softmax_classification_on_denoised(
         batch_size=denoise_batch_size,
     )
 
+    train_mean = np.mean(x_train, axis=0, keepdims=True)
+    train_std = np.std(x_train, axis=0, keepdims=True)
+    train_std = np.where(train_std < 1e-6, 1.0, train_std)
+
+    x_train = _apply_standardization(x_train, train_mean, train_std)
+    x_val = _apply_standardization(x_val, train_mean, train_std)
+
     class_count = int(max(np.max(y_train), np.max(y_val)) + 1)
     if y_test is not None:
         y_test = np.asarray(y_test, dtype=np.int64)
@@ -96,6 +112,7 @@ def run_softmax_classification_on_denoised(
             noisy_test,
             batch_size=denoise_batch_size,
         )
+        x_test = _apply_standardization(x_test, train_mean, train_std)
         result["classification_test_accuracy"] = classifier.score(x_test, y_test)
         result["test_predictions"] = classifier.predict(x_test)
 

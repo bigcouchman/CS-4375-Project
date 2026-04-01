@@ -14,11 +14,13 @@ from src.data import (
     add_salt_pepper_noise,
     load_cifar10,
     normalize_images,
+    resize_images,
+    select_random_subset,
     validate_cifar10_dataset,
 )
-from src.evaluation.visualize import save_denoising_grid
-from src.models import CDAE
-from src.training import run_kfold_experiment, train_fold
+from src.evaluation.visualize import save_denoising_grid, save_loss_curve
+from src.models import CDAE, FullyConnectedDAE
+from src.training import run_kfold_evaluation_only, run_kfold_experiment, train_fold
 from src.utils import ExperimentLogger, set_global_seed
 
 
@@ -38,7 +40,10 @@ CIFAR10_CLASS_NAMES = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CDAE CIFAR-10 denoising with custom NumPy layers")
-    parser.add_argument("--mode", choices=["kfold", "single"], default="kfold")
+    parser.add_argument("--mode", choices=["kfold", "single", "kfold_eval"], default="kfold")
+    parser.add_argument("--model-type", choices=["conv", "fc"], default="fc")
+    parser.add_argument("--fc-hidden-dim", type=int, default=512)
+    parser.add_argument("--fc-bottleneck-dim", type=int, default=128)
     parser.add_argument("--data-root", type=str, default="data")
     parser.add_argument(
         "--download-dataset",
@@ -61,11 +66,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--salt-pepper-amount", type=float, default=0.01)
     parser.add_argument("--max-samples", type=int, default=1000)
     parser.add_argument("--max-test-samples", type=int, default=1000)
+    parser.add_argument("--resize-to", type=int, default=16)
+    parser.add_argument(
+        "--random-subset",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Randomly sample the requested subset size from train/test before training/evaluation.",
+    )
     parser.add_argument("--val-ratio", type=float, default=0.2)
     parser.add_argument("--resume-checkpoint", type=str, default="")
     parser.add_argument("--save-checkpoint", type=str, default="")
     parser.add_argument("--save-figure", action="store_true")
     parser.add_argument("--figure-name", type=str, default="denoising_preview.png")
+    parser.add_argument("--save-loss-curve", action="store_true")
+    parser.add_argument("--loss-curve-name", type=str, default="training_loss_curve.png")
+    parser.add_argument(
+        "--kfold-eval-output",
+        type=str,
+        default="reports/tables/kfold_eval_summary_latest.csv",
+    )
     parser.add_argument("--num-figure-images", type=int, default=8)
     parser.add_argument("--run-classification", action="store_true")
     parser.add_argument("--classifier-epochs", type=int, default=20)
@@ -192,7 +211,12 @@ def make_log_row(
         "noise_type": args.noise_type,
         "noise_std": args.noise_std,
         "salt_pepper_amount": args.salt_pepper_amount,
+        "model_type": args.model_type,
         "latent_channels": args.latent_channels,
+        "fc_hidden_dim": args.fc_hidden_dim,
+        "fc_bottleneck_dim": args.fc_bottleneck_dim,
+        "resize_to": args.resize_to,
+        "random_subset": int(args.random_subset),
         "max_samples": args.max_samples,
         "max_test_samples": args.max_test_samples,
         "resume_checkpoint": args.resume_checkpoint,
@@ -216,6 +240,7 @@ def make_log_row(
         "val_psnr": result.get("val_psnr", ""),
         "test_psnr": result.get("test_psnr", ""),
         "figure_path": result.get("figure_path", ""),
+        "loss_curve_path": result.get("loss_curve_path", ""),
         "predictions_path": result.get("predictions_path", ""),
         "best_fold": result.get("best_fold", ""),
         "is_best_fold": result.get("is_best_fold", ""),
@@ -238,7 +263,6 @@ def main() -> None:
     cfg.noise.std = args.noise_std
     cfg.train.max_train_samples = args.max_samples
     cfg.train.random_seed = args.seed
-    cfg.model.latent_channels = args.latent_channels
 
     set_global_seed(cfg.train.random_seed)
 
@@ -262,13 +286,122 @@ def main() -> None:
     x_train = normalize_images(x_train)
     x_test = normalize_images(x_test)
 
+    if args.resize_to != x_train.shape[1]:
+        x_train = resize_images(x_train, target_size=args.resize_to)
+        x_test = resize_images(x_test, target_size=args.resize_to)
+        print(f"[INFO] Resized inputs to: {x_train.shape[1]}x{x_train.shape[2]}")
+
     sample_count = min(cfg.train.max_train_samples, x_train.shape[0])
     test_sample_count = min(args.max_test_samples, x_test.shape[0])
 
-    clean_images = x_train[:sample_count]
-    clean_test_images = x_test[:test_sample_count]
-    train_labels = y_train[:sample_count]
-    test_labels = y_test[:test_sample_count]
+    if args.random_subset:
+        clean_images, train_labels = select_random_subset(
+            x_train,
+            y_train,
+            max_samples=sample_count,
+            seed=cfg.train.random_seed,
+        )
+        clean_test_images, test_labels = select_random_subset(
+            x_test,
+            y_test,
+            max_samples=test_sample_count,
+            seed=cfg.train.random_seed + 1,
+        )
+        print(
+            "[INFO] Using randomized subset: "
+            f"train={clean_images.shape[0]} test={clean_test_images.shape[0]}"
+        )
+    else:
+        clean_images = x_train[:sample_count]
+        clean_test_images = x_test[:test_sample_count]
+        train_labels = y_train[:sample_count]
+        test_labels = y_test[:test_sample_count]
+
+    def build_model():
+        if args.model_type == "conv":
+            model = CDAE(
+                input_channels=int(clean_images.shape[-1]),
+                latent_channels=args.latent_channels,
+                seed=cfg.train.random_seed,
+            )
+        else:
+            model = FullyConnectedDAE(
+                input_shape=(
+                    int(clean_images.shape[1]),
+                    int(clean_images.shape[2]),
+                    int(clean_images.shape[3]),
+                ),
+                hidden_dim=args.fc_hidden_dim,
+                bottleneck_dim=args.fc_bottleneck_dim,
+                seed=cfg.train.random_seed,
+                skip_connection_weight=0.2,
+            )
+
+        if args.resume_checkpoint:
+            model.load_checkpoint(args.resume_checkpoint)
+            print(f"[INFO] Loaded checkpoint for initialization: {args.resume_checkpoint}")
+
+        return model
+
+    logger = ExperimentLogger(cfg.paths.logs_csv_path)
+    next_experiment_id = logger.next_experiment_id()
+
+    if cfg.train.mode == "kfold_eval":
+        if not args.resume_checkpoint:
+            raise ValueError(
+                "kfold_eval mode requires --resume-checkpoint to evaluate a pre-trained model."
+            )
+
+        model = build_model()
+        eval_result = run_kfold_evaluation_only(
+            model=model,
+            clean_images=clean_images,
+            k_folds=cfg.train.k_folds,
+            batch_size=cfg.train.batch_size,
+            seed=cfg.train.random_seed,
+            noise_type=cfg.noise.noise_type,
+            noise_std=cfg.noise.std,
+            salt_pepper_amount=args.salt_pepper_amount,
+            output_csv_path=args.kfold_eval_output,
+        )
+
+        fold_results = [
+            result
+            for result in eval_result.get("fold_results", [])
+            if isinstance(result, dict)
+        ]
+        for result in fold_results:
+            logger.log_run(
+                make_log_row(
+                    experiment_id=next_experiment_id,
+                    result=result,
+                    args=args,
+                    mode="kfold_eval",
+                    fold=int(result["fold"]),
+                    logger=logger,
+                    checkpoint_path=args.resume_checkpoint,
+                    train_sample_count=sample_count,
+                    test_sample_count=test_sample_count,
+                    notes="kfold evaluation only (no retraining)",
+                )
+            )
+            next_experiment_id += 1
+
+        eval_summary = eval_result.get("summary", {})
+        print("\nK-Fold Evaluation Summary (mean +/- std):")
+        print(
+            f"  val_mse: {float(eval_summary.get('val_mse_mean', float('nan'))):.8f} "
+            f"+/- {float(eval_summary.get('val_mse_std', float('nan'))):.8f}"
+        )
+        print(
+            f"  val_rmse: {float(eval_summary.get('val_rmse_mean', float('nan'))):.8f} "
+            f"+/- {float(eval_summary.get('val_rmse_std', float('nan'))):.8f}"
+        )
+        print(
+            f"  val_psnr: {float(eval_summary.get('val_psnr_mean', float('nan'))):.6f} "
+            f"+/- {float(eval_summary.get('val_psnr_std', float('nan'))):.6f}"
+        )
+        return
 
     noisy_images = create_noisy_images(
         clean_images,
@@ -284,22 +417,6 @@ def main() -> None:
         salt_pepper_amount=args.salt_pepper_amount,
         seed=cfg.train.random_seed + 1000,
     )
-
-    def build_model() -> CDAE:
-        model = CDAE(
-            input_channels=cfg.model.input_channels,
-            latent_channels=args.latent_channels,
-            seed=cfg.train.random_seed,
-        )
-
-        if args.resume_checkpoint:
-            model.load_checkpoint(args.resume_checkpoint)
-            print(f"[INFO] Loaded checkpoint for initialization: {args.resume_checkpoint}")
-
-        return model
-
-    logger = ExperimentLogger(cfg.paths.logs_csv_path)
-    next_experiment_id = logger.next_experiment_id()
 
     if cfg.train.mode == "kfold":
         checkpoint_prefix = ""
@@ -339,6 +456,8 @@ def main() -> None:
             predictions_output_path=args.predictions_output,
             num_prediction_samples=args.num_prediction_samples,
             class_names=CIFAR10_CLASS_NAMES,
+            save_loss_curves=args.save_loss_curve,
+            loss_curve_output_path=cfg.paths.figure_output_dir / args.loss_curve_name,
         )
 
         for result in fold_results:
@@ -353,7 +472,7 @@ def main() -> None:
                     checkpoint_path=str(result.get("checkpoint_path", "")),
                     train_sample_count=sample_count,
                     test_sample_count=test_sample_count,
-                    notes="custom numpy CDAE kfold run",
+                    notes=f"custom numpy {args.model_type} denoiser kfold run",
                 )
             )
             next_experiment_id += 1
@@ -376,6 +495,14 @@ def main() -> None:
                 "[INFO] Saved K-fold prediction samples with suffixes to: "
                 f"{predictions_base.parent} "
                 f"(e.g., {predictions_base.stem}_fold1{predictions_base.suffix or '.csv'})"
+            )
+
+        if args.save_loss_curve:
+            loss_curve_base = cfg.paths.figure_output_dir / args.loss_curve_name
+            print(
+                "[INFO] Saved K-fold loss curves with suffixes to: "
+                f"{loss_curve_base.parent} "
+                f"(e.g., {loss_curve_base.stem}_fold1{loss_curve_base.suffix or '.png'})"
             )
 
         best_checkpoint_candidates = {
@@ -481,6 +608,15 @@ def main() -> None:
             )
             print(f"[INFO] Saved denoising preview figure to: {figure_path}")
 
+        if args.save_loss_curve:
+            loss_curve_path = cfg.paths.figure_output_dir / args.loss_curve_name
+            save_loss_curve(
+                history=[entry for entry in result.get("history", []) if isinstance(entry, dict)],
+                output_path=loss_curve_path,
+            )
+            result["loss_curve_path"] = str(loss_curve_path)
+            print(f"[INFO] Saved training loss curve to: {loss_curve_path}")
+
         logger.log_run(
             make_log_row(
                 experiment_id=next_experiment_id,
@@ -492,7 +628,7 @@ def main() -> None:
                 checkpoint_path=checkpoint_path,
                 train_sample_count=sample_count,
                 test_sample_count=test_sample_count,
-                notes="custom numpy CDAE single run",
+                notes=f"custom numpy {args.model_type} denoiser single run",
             )
         )
         next_experiment_id += 1

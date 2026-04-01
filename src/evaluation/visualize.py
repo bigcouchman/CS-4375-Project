@@ -35,3 +35,28 @@ def save_denoising_grid(
     figure.tight_layout()
     figure.savefig(output_path, dpi=150)
     plt.close(figure)
+
+
+def save_loss_curve(history: list[dict[str, float]], output_path: Path) -> None:
+    if not history:
+        return
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    epochs = [int(entry["epoch"]) for entry in history if "epoch" in entry]
+    losses = [float(entry["batch_loss_mean"]) for entry in history if "batch_loss_mean" in entry]
+
+    if not epochs or not losses:
+        return
+
+    figure, axis = plt.subplots(figsize=(7, 4))
+    axis.plot(epochs, losses, color="#1f77b4", linewidth=2)
+    axis.set_title("Training Loss per Epoch")
+    axis.set_xlabel("Epoch")
+    axis.set_ylabel("Batch MSE Loss")
+    axis.grid(alpha=0.3)
+
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=150)
+    plt.close(figure)

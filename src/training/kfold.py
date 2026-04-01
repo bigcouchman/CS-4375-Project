@@ -8,9 +8,10 @@ import numpy as np
 from sklearn.model_selection import KFold
 
 from src.classification import run_softmax_classification_on_denoised
-from src.evaluation.visualize import save_denoising_grid
+from src.data import add_gaussian_noise, add_salt_pepper_noise
+from src.evaluation.visualize import save_denoising_grid, save_loss_curve
 
-from .trainer import train_fold
+from .trainer import compute_metrics, train_fold
 
 
 def _fold_output_path(base_path: str | Path, fold_number: int, default_suffix: str) -> Path:
@@ -51,6 +52,199 @@ def _write_prediction_samples(
             )
 
 
+def _numpy_kfold_validation_indices(
+    sample_count: int,
+    k_folds: int,
+    seed: int,
+) -> list[np.ndarray]:
+    if k_folds <= 1:
+        raise ValueError("k_folds must be >= 2.")
+    if sample_count < k_folds:
+        raise ValueError("k_folds cannot be greater than number of samples.")
+
+    rng = np.random.default_rng(seed)
+    shuffled_indices = np.arange(sample_count)
+    rng.shuffle(shuffled_indices)
+
+    folds = np.array_split(shuffled_indices, k_folds)
+    return [np.asarray(fold, dtype=np.int64) for fold in folds]
+
+
+def _summarize_eval_folds(fold_results: list[dict[str, float]]) -> dict[str, float]:
+    val_mse = np.asarray([row["val_mse"] for row in fold_results], dtype=np.float64)
+    val_rmse = np.asarray([row["val_rmse"] for row in fold_results], dtype=np.float64)
+    val_psnr = np.asarray([row["val_psnr"] for row in fold_results], dtype=np.float64)
+
+    finite_psnr = val_psnr[np.isfinite(val_psnr)]
+    if finite_psnr.size > 0:
+        psnr_mean = float(np.mean(finite_psnr))
+        psnr_std = float(np.std(finite_psnr))
+    else:
+        psnr_mean = float("inf")
+        psnr_std = 0.0
+
+    return {
+        "val_mse_mean": float(np.mean(val_mse)),
+        "val_mse_std": float(np.std(val_mse)),
+        "val_rmse_mean": float(np.mean(val_rmse)),
+        "val_rmse_std": float(np.std(val_rmse)),
+        "val_psnr_mean": psnr_mean,
+        "val_psnr_std": psnr_std,
+    }
+
+
+def _print_kfold_eval_report(
+    fold_results: list[dict[str, float]],
+    summary: dict[str, float],
+) -> None:
+    print("\nIEEE-Style K-Fold Evaluation (Inference Only)")
+    print("Fold |     MSE      |     RMSE     |   PSNR (dB)")
+    print("-----+--------------+--------------+-------------")
+    for row in fold_results:
+        print(
+            f"{int(row['fold']):>4} | "
+            f"{row['val_mse']:.8f} | "
+            f"{row['val_rmse']:.8f} | "
+            f"{row['val_psnr']:.6f}"
+        )
+    print("-----+--------------+--------------+-------------")
+    print(
+        "Mean+/-Std | "
+        f"{summary['val_mse_mean']:.8f} +/- {summary['val_mse_std']:.8f} | "
+        f"{summary['val_rmse_mean']:.8f} +/- {summary['val_rmse_std']:.8f} | "
+        f"{summary['val_psnr_mean']:.6f} +/- {summary['val_psnr_std']:.6f}"
+    )
+
+
+def _write_kfold_eval_csv(
+    output_csv_path: str | Path,
+    fold_results: list[dict[str, float]],
+    summary: dict[str, float],
+) -> Path:
+    output_csv_path = Path(output_csv_path)
+    output_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+        fieldnames = ["row_type", "fold", "val_samples", "val_mse", "val_rmse", "val_psnr"]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for row in fold_results:
+            writer.writerow(
+                {
+                    "row_type": "fold",
+                    "fold": int(row["fold"]),
+                    "val_samples": int(row["val_samples"]),
+                    "val_mse": f"{row['val_mse']:.10f}",
+                    "val_rmse": f"{row['val_rmse']:.10f}",
+                    "val_psnr": f"{row['val_psnr']:.10f}",
+                }
+            )
+
+        writer.writerow(
+            {
+                "row_type": "mean",
+                "fold": "",
+                "val_samples": "",
+                "val_mse": f"{summary['val_mse_mean']:.10f}",
+                "val_rmse": f"{summary['val_rmse_mean']:.10f}",
+                "val_psnr": f"{summary['val_psnr_mean']:.10f}",
+            }
+        )
+        writer.writerow(
+            {
+                "row_type": "std",
+                "fold": "",
+                "val_samples": "",
+                "val_mse": f"{summary['val_mse_std']:.10f}",
+                "val_rmse": f"{summary['val_rmse_std']:.10f}",
+                "val_psnr": f"{summary['val_psnr_std']:.10f}",
+            }
+        )
+
+    return output_csv_path
+
+
+def run_kfold_evaluation_only(
+    model,
+    clean_images: np.ndarray,
+    k_folds: int,
+    batch_size: int,
+    seed: int,
+    noise_type: str = "gaussian",
+    noise_std: float = 0.1,
+    salt_pepper_amount: float = 0.01,
+    output_csv_path: str | Path | None = None,
+) -> dict[str, object]:
+    if clean_images.ndim != 4:
+        raise ValueError("clean_images must have shape (N, H, W, C).")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0.")
+
+    val_folds = _numpy_kfold_validation_indices(
+        sample_count=clean_images.shape[0],
+        k_folds=k_folds,
+        seed=seed,
+    )
+
+    fold_results: list[dict[str, float]] = []
+
+    for fold_number, val_idx in enumerate(val_folds, start=1):
+        clean_val = clean_images[val_idx]
+
+        if noise_type == "gaussian":
+            noisy_val = add_gaussian_noise(
+                clean_val,
+                std=noise_std,
+                seed=seed + fold_number,
+            )
+        elif noise_type == "salt_pepper":
+            noisy_val = add_salt_pepper_noise(
+                clean_val,
+                amount=salt_pepper_amount,
+                seed=seed + fold_number,
+            )
+        else:
+            raise ValueError(f"Unsupported noise_type for evaluation: {noise_type}")
+
+        fold_metrics = compute_metrics(
+            model=model,
+            noisy_images=noisy_val,
+            clean_images=clean_val,
+            batch_size=batch_size,
+        )
+
+        fold_results.append(
+            {
+                "fold": int(fold_number),
+                "val_samples": int(clean_val.shape[0]),
+                "val_mse": float(fold_metrics["mse"]),
+                "val_rmse": float(fold_metrics["rmse"]),
+                "val_psnr": float(fold_metrics["psnr"]),
+            }
+        )
+
+    summary = _summarize_eval_folds(fold_results)
+    _print_kfold_eval_report(fold_results, summary)
+
+    written_output_path = ""
+    if output_csv_path is not None:
+        written_output_path = str(
+            _write_kfold_eval_csv(
+                output_csv_path=output_csv_path,
+                fold_results=fold_results,
+                summary=summary,
+            )
+        )
+        print(f"[INFO] Saved K-fold evaluation table to: {written_output_path}")
+
+    return {
+        "fold_results": fold_results,
+        "summary": summary,
+        "output_csv_path": written_output_path,
+    }
+
+
 def run_kfold_experiment(
     clean_images: np.ndarray,
     noisy_images: np.ndarray,
@@ -83,6 +277,8 @@ def run_kfold_experiment(
     predictions_output_path: str | Path | None = None,
     num_prediction_samples: int = 100,
     class_names: list[str] | None = None,
+    save_loss_curves: bool = False,
+    loss_curve_output_path: str | Path | None = None,
 ) -> list[dict[str, object]]:
     if clean_images.shape != noisy_images.shape:
         raise ValueError("Clean and noisy arrays must have matching shapes.")
@@ -192,6 +388,18 @@ def run_kfold_experiment(
                     num_images=preview_count,
                 )
                 fold_result["figure_path"] = str(figure_path)
+
+        if save_loss_curves and loss_curve_output_path is not None:
+            loss_curve_path = _fold_output_path(
+                loss_curve_output_path,
+                fold_number=fold_number,
+                default_suffix=".png",
+            )
+            save_loss_curve(
+                history=[entry for entry in fold_result.get("history", []) if isinstance(entry, dict)],
+                output_path=loss_curve_path,
+            )
+            fold_result["loss_curve_path"] = str(loss_curve_path)
 
         if checkpoint_prefix:
             checkpoint_path = Path(f"{checkpoint_prefix}_fold{fold_number}.npz")

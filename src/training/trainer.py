@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
+
+import numpy as np
+
+
+def iterate_minibatches(
+    noisy_images: np.ndarray,
+    clean_images: np.ndarray,
+    batch_size: int,
+    seed: int,
+) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    if noisy_images.shape != clean_images.shape:
+        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+
+    rng = np.random.default_rng(seed)
+    indices = np.arange(noisy_images.shape[0])
+    rng.shuffle(indices)
+
+    for start in range(0, len(indices), batch_size):
+        batch_idx = indices[start : start + batch_size]
+        yield noisy_images[batch_idx], clean_images[batch_idx]
+
+
+def compute_metrics(
+    model: Any,
+    noisy_images: np.ndarray,
+    clean_images: np.ndarray,
+    batch_size: int,
+) -> dict[str, float]:
+    if noisy_images.shape != clean_images.shape:
+        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0.")
+
+    total_squared_error = 0.0
+    total_elements = 0
+
+    for start in range(0, noisy_images.shape[0], batch_size):
+        end = min(start + batch_size, noisy_images.shape[0])
+        noisy_batch = noisy_images[start:end]
+        clean_batch = clean_images[start:end]
+
+        reconstructed_batch = model.forward(noisy_batch)
+        diff = clean_batch - reconstructed_batch
+
+        total_squared_error += float(np.sum(diff * diff, dtype=np.float64))
+        total_elements += int(diff.size)
+
+    mse_value = float(total_squared_error / max(total_elements, 1))
+    rmse_value = float(np.sqrt(mse_value))
+    psnr_value = (
+        float("inf")
+        if mse_value == 0.0
+        else float(20.0 * np.log10(1.0) - 10.0 * np.log10(mse_value))
+    )
+
+    return {
+        "mse": mse_value,
+        "rmse": rmse_value,
+        "psnr": psnr_value,
+    }
+
+
+def train_fold(
+    model,
+    noisy_train: np.ndarray,
+    clean_train: np.ndarray,
+    noisy_val: np.ndarray,
+    clean_val: np.ndarray,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    seed: int,
+    weight_decay: float = 0.0,
+    lr_decay: float = 1.0,
+    lr_decay_every: int = 0,
+    early_stopping_patience: int = 0,
+    min_delta: float = 0.0,
+    noisy_test: np.ndarray | None = None,
+    clean_test: np.ndarray | None = None,
+) -> dict[str, object]:
+    history: list[dict[str, float]] = []
+    current_learning_rate = learning_rate
+
+    best_val_mse = float("inf")
+    best_epoch = 0
+    epochs_without_improvement = 0
+    best_state: dict[str, np.ndarray] | None = None
+
+    if hasattr(model, "state_dict"):
+        best_state = model.state_dict()
+
+    for epoch in range(1, epochs + 1):
+        batch_losses: list[float] = []
+
+        for noisy_batch, clean_batch in iterate_minibatches(
+            noisy_train,
+            clean_train,
+            batch_size=batch_size,
+            seed=seed + epoch,
+        ):
+            batch_loss, reconstructed = model.train_step(noisy_batch, clean_batch)
+            batch_losses.append(batch_loss)
+
+            loss_grad = model.mse_grad(reconstructed, clean_batch)
+            model.backward_and_update(
+                loss_grad,
+                current_learning_rate,
+                weight_decay=weight_decay,
+            )
+
+        train_metrics = compute_metrics(model, noisy_train, clean_train, batch_size=batch_size)
+        val_metrics = compute_metrics(model, noisy_val, clean_val, batch_size=batch_size)
+
+        train_mse_value = train_metrics["mse"]
+        val_mse_value = val_metrics["mse"]
+
+        history.append(
+            {
+                "epoch": float(epoch),
+                "batch_loss_mean": float(np.mean(batch_losses)),
+                "learning_rate": float(current_learning_rate),
+                "train_mse": float(train_metrics["mse"]),
+                "val_mse": float(val_metrics["mse"]),
+                "train_rmse": float(train_metrics["rmse"]),
+                "val_rmse": float(val_metrics["rmse"]),
+                "train_psnr": float(train_metrics["psnr"]),
+                "val_psnr": float(val_metrics["psnr"]),
+            }
+        )
+
+        print(
+            f"Epoch {epoch:02d}/{epochs} | "
+            f"batch_loss_mean={np.mean(batch_losses):.6f} | "
+            f"lr={current_learning_rate:.6f} | "
+            f"train_mse={train_mse_value:.6f} | val_mse={val_mse_value:.6f}"
+        )
+
+        improved = (best_val_mse - val_mse_value) > min_delta
+        if improved:
+            best_val_mse = val_mse_value
+            best_epoch = epoch
+            epochs_without_improvement = 0
+            if hasattr(model, "state_dict"):
+                best_state = model.state_dict()
+        else:
+            epochs_without_improvement += 1
+
+        if lr_decay_every > 0 and lr_decay < 1.0 and (epoch % lr_decay_every == 0):
+            current_learning_rate *= lr_decay
+            print(f"[INFO] Learning rate decayed to {current_learning_rate:.6f}")
+
+        if early_stopping_patience > 0 and epochs_without_improvement >= early_stopping_patience:
+            print(
+                "[INFO] Early stopping triggered: "
+                f"no val_mse improvement > {min_delta} for {early_stopping_patience} epochs."
+            )
+            break
+
+    if history and best_state is not None and hasattr(model, "load_state_dict"):
+        model.load_state_dict(best_state)
+        print(f"[INFO] Restored best checkpoint from epoch {best_epoch} (val_mse={best_val_mse:.6f}).")
+
+    final_train_metrics = compute_metrics(model, noisy_train, clean_train, batch_size=batch_size)
+    final_val_metrics = compute_metrics(model, noisy_val, clean_val, batch_size=batch_size)
+
+    if not history:
+        best_val_mse = final_val_metrics["mse"]
+
+    result = {
+        "history": history,
+        "epochs_completed": len(history),
+        "best_epoch": best_epoch,
+        "best_val_mse": best_val_mse,
+        "final_learning_rate": current_learning_rate,
+        "train_mse": final_train_metrics["mse"],
+        "val_mse": final_val_metrics["mse"],
+        "train_rmse": final_train_metrics["rmse"],
+        "val_rmse": final_val_metrics["rmse"],
+        "train_psnr": final_train_metrics["psnr"],
+        "val_psnr": final_val_metrics["psnr"],
+    }
+
+    if noisy_test is not None and clean_test is not None:
+        final_test_metrics = compute_metrics(model, noisy_test, clean_test, batch_size=batch_size)
+        result["test_mse"] = final_test_metrics["mse"]
+        result["test_rmse"] = final_test_metrics["rmse"]
+        result["test_psnr"] = final_test_metrics["psnr"]
+
+    return result

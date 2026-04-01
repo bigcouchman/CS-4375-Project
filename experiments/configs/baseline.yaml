@@ -1,0 +1,46 @@
+project:
+  name: "CS-4375 CDAE Denoising"
+  team:
+    - "Casey Nguyen (CXN220034)"
+    - "Nguyen Phuc Do (NPD220001)"
+
+dataset:
+  name: "CIFAR-10"
+  root: "data"
+  normalize: true
+  max_train_samples: 4000
+  max_test_samples: 1000
+
+training:
+  mode: "single"
+  k_folds: 5
+  epochs: 10
+  batch_size: 32
+  learning_rate: 0.001
+  lr_decay: 0.95
+  lr_decay_every: 2
+  early_stopping_patience: 4
+  min_delta: 0.0001
+  seed: 42
+
+noise:
+  type: "gaussian"
+  std: 0.1
+  salt_pepper_amount: 0.01
+
+model:
+  input_shape: [32, 32, 3]
+  latent_channels: 32
+  regularization: 0.0001
+
+classification:
+  enabled: true
+  algorithm: "custom_softmax_regression"
+  epochs: 25
+  batch_size: 64
+  learning_rate: 0.08
+  weight_decay: 0.0001
+
+logging:
+  output_csv: "experiments/logs/experiment_runs.csv"
+  predictions_output_csv: "reports/tables/base_predictions.csv"

@@ -15,12 +15,14 @@ class FullyConnectedDAE:
         bottleneck_dim: int = 128,
         seed: int = 42,
         skip_connection_weight: float = 0.25,
+        l1_weight: float = 0.0,
     ) -> None:
         self.input_shape = tuple(int(value) for value in input_shape)
         self.input_dim = int(np.prod(self.input_shape))
         self.hidden_dim = int(hidden_dim)
         self.bottleneck_dim = int(bottleneck_dim)
         self.skip_connection_weight = float(np.clip(skip_connection_weight, 0.0, 0.95))
+        self.l1_weight = max(0.0, float(l1_weight))
 
         rng = np.random.default_rng(seed)
 
@@ -112,9 +114,28 @@ class FullyConnectedDAE:
     def mse_grad(predictions: np.ndarray, targets: np.ndarray) -> np.ndarray:
         return (2.0 / predictions.size) * (predictions - targets)
 
+    @staticmethod
+    def mae_loss(predictions: np.ndarray, targets: np.ndarray) -> float:
+        return float(np.mean(np.abs(predictions - targets), dtype=np.float32))
+
+    @staticmethod
+    def mae_grad(predictions: np.ndarray, targets: np.ndarray) -> np.ndarray:
+        return np.sign(predictions - targets) / predictions.size
+
+    def loss_and_grad(self, predictions: np.ndarray, targets: np.ndarray) -> tuple[float, np.ndarray]:
+        mse_value = self.mse_loss(predictions, targets)
+        grad = self.mse_grad(predictions, targets)
+
+        if self.l1_weight <= 0.0:
+            return mse_value, grad
+
+        mae_value = self.mae_loss(predictions, targets)
+        grad = grad + (self.l1_weight * self.mae_grad(predictions, targets))
+        return float(mse_value + (self.l1_weight * mae_value)), grad.astype(np.float32)
+
     def train_step(self, noisy_batch: np.ndarray, clean_batch: np.ndarray) -> tuple[float, np.ndarray]:
         reconstructed = self.forward(noisy_batch)
-        loss = self.mse_loss(reconstructed, clean_batch)
+        loss, _ = self.loss_and_grad(reconstructed, clean_batch)
         return loss, reconstructed
 
     def backward_and_update(
@@ -178,6 +199,7 @@ class FullyConnectedDAE:
             "meta_hidden_dim": np.asarray([self.hidden_dim], dtype=np.int64),
             "meta_bottleneck_dim": np.asarray([self.bottleneck_dim], dtype=np.int64),
             "meta_skip_connection_weight": np.asarray([self.skip_connection_weight], dtype=np.float32),
+            "meta_l1_weight": np.asarray([self.l1_weight], dtype=np.float32),
             "w1": self.w1.copy(),
             "b1": self.b1.copy(),
             "w2": self.w2.copy(),
@@ -209,6 +231,9 @@ class FullyConnectedDAE:
             self.skip_connection_weight = float(
                 np.asarray(state["meta_skip_connection_weight"]).ravel()[0]
             )
+
+        if "meta_l1_weight" in state:
+            self.l1_weight = float(np.asarray(state["meta_l1_weight"]).ravel()[0])
 
     def save_checkpoint(self, checkpoint_path: str | Path) -> None:
         checkpoint_path = Path(checkpoint_path)

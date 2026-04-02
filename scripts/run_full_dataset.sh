@@ -35,7 +35,7 @@ PY
 
 FULL_MODE="${FULL_MODE:-single}"
 FULL_K_FOLDS="${FULL_K_FOLDS:-5}"
-FULL_EPOCHS="${FULL_EPOCHS:-12}"
+FULL_EPOCHS="${FULL_EPOCHS:-30}"
 FULL_BATCH_SIZE="${FULL_BATCH_SIZE:-64}"
 FULL_LEARNING_RATE="${FULL_LEARNING_RATE:-0.001}"
 FULL_LR_DECAY="${FULL_LR_DECAY:-0.98}"
@@ -45,14 +45,19 @@ FULL_EARLY_STOPPING_PATIENCE="${FULL_EARLY_STOPPING_PATIENCE:-4}"
 FULL_MIN_DELTA="${FULL_MIN_DELTA:-0.00001}"
 FULL_MAX_SAMPLES="${FULL_MAX_SAMPLES:-10000}"
 FULL_MAX_TEST_SAMPLES="${FULL_MAX_TEST_SAMPLES:-2500}"
-FULL_MODEL_TYPE="${FULL_MODEL_TYPE:-fc}"
-FULL_LATENT_CHANNELS="${FULL_LATENT_CHANNELS:-32}"
+FULL_MODEL_TYPE="${FULL_MODEL_TYPE:-conv}"
+FULL_LATENT_CHANNELS="${FULL_LATENT_CHANNELS:-64}"
+FULL_CONV_SKIP_CONNECTION_WEIGHT="${FULL_CONV_SKIP_CONNECTION_WEIGHT:-0.7}"
 FULL_FC_HIDDEN_DIM="${FULL_FC_HIDDEN_DIM:-1024}"
 FULL_FC_BOTTLENECK_DIM="${FULL_FC_BOTTLENECK_DIM:-256}"
+FULL_L1_WEIGHT="${FULL_L1_WEIGHT:-0.1}"
 FULL_RESIZE_TO="${FULL_RESIZE_TO:-32}"
 FULL_RANDOM_SUBSET="${FULL_RANDOM_SUBSET:-1}"
 FULL_NOISE_TYPE="${FULL_NOISE_TYPE:-gaussian}"
 FULL_NOISE_STD="${FULL_NOISE_STD:-0.1}"
+FULL_SAMPLE_NOISE_PER_BATCH="${FULL_SAMPLE_NOISE_PER_BATCH:-1}"
+FULL_BATCH_NOISE_STD_OPTIONS="${FULL_BATCH_NOISE_STD_OPTIONS:-0.05,0.1}"
+FULL_TRACK_SSIM="${FULL_TRACK_SSIM:-0}"
 FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-}"
 FULL_CHECKPOINT_PREFIX="${FULL_CHECKPOINT_PREFIX:-experiments/checkpoints/cdae_denoise_focus}"
 FULL_RUN_CLASSIFICATION="${FULL_RUN_CLASSIFICATION:-1}"
@@ -117,6 +122,8 @@ args=(
   --min-delta "$FULL_MIN_DELTA"
   --noise-type "$FULL_NOISE_TYPE"
   --noise-std "$FULL_NOISE_STD"
+    --l1-weight "$FULL_L1_WEIGHT"
+    --batch-noise-std-options "$FULL_BATCH_NOISE_STD_OPTIONS"
   --max-samples "$FULL_MAX_SAMPLES"
   --max-test-samples "$FULL_MAX_TEST_SAMPLES"
     --model-type "$FULL_MODEL_TYPE"
@@ -137,13 +144,28 @@ if [[ "$FULL_MODEL_TYPE" == "fc" ]]; then
         --fc-bottleneck-dim "$FULL_FC_BOTTLENECK_DIM"
     )
 else
-    args+=(--latent-channels "$FULL_LATENT_CHANNELS")
+    args+=(
+        --latent-channels "$FULL_LATENT_CHANNELS"
+        --conv-skip-connection-weight "$FULL_CONV_SKIP_CONNECTION_WEIGHT"
+    )
 fi
 
 if [[ "$FULL_RANDOM_SUBSET" -eq 1 ]]; then
     args+=(--random-subset)
 else
     args+=(--no-random-subset)
+fi
+
+if [[ "$FULL_SAMPLE_NOISE_PER_BATCH" -eq 1 ]]; then
+    args+=(--sample-noise-per-batch)
+else
+    args+=(--no-sample-noise-per-batch)
+fi
+
+if [[ "$FULL_TRACK_SSIM" -eq 1 ]]; then
+    args+=(--track-ssim)
+else
+    args+=(--no-track-ssim)
 fi
 
 if [[ "$FULL_SAVE_LOSS_CURVE" -eq 1 ]]; then
@@ -214,6 +236,7 @@ for row in new_rows:
         f"train_psnr={row.get('train_psnr', '')} "
         f"val_psnr={row.get('val_psnr', '')} "
         f"test_psnr={row.get('test_psnr', '')} "
+        f"val_ssim={row.get('val_ssim', '')} "
         f"cls_test_acc={row.get('classification_test_accuracy', '')}"
     )
 
@@ -244,6 +267,9 @@ metrics = {
     "train_psnr": aggregate("train_psnr"),
     "val_psnr": aggregate("val_psnr"),
     "test_psnr": aggregate("test_psnr"),
+    "train_ssim": aggregate("train_ssim"),
+    "val_ssim": aggregate("val_ssim"),
+    "test_ssim": aggregate("test_ssim"),
     "classification_train_accuracy": aggregate("classification_train_accuracy"),
     "classification_val_accuracy": aggregate("classification_val_accuracy"),
     "classification_test_accuracy": aggregate("classification_test_accuracy"),
@@ -272,6 +298,9 @@ summary = {
     "learning_rate": best_row.get("learning_rate", ""),
     "noise_type": best_row.get("noise_type", ""),
     "noise_std": best_row.get("noise_std", ""),
+    "l1_weight": best_row.get("l1_weight", ""),
+    "sample_noise_per_batch": best_row.get("sample_noise_per_batch", ""),
+    "batch_noise_std_options": best_row.get("batch_noise_std_options", ""),
     "latent_channels": best_row.get("latent_channels", ""),
     "max_samples": best_row.get("max_samples", ""),
     "max_test_samples": best_row.get("max_test_samples", ""),
@@ -295,6 +324,12 @@ summary = {
     "val_psnr_std": metrics["val_psnr"][1],
     "test_psnr_mean": metrics["test_psnr"][0],
     "test_psnr_std": metrics["test_psnr"][1],
+    "train_ssim_mean": metrics["train_ssim"][0],
+    "train_ssim_std": metrics["train_ssim"][1],
+    "val_ssim_mean": metrics["val_ssim"][0],
+    "val_ssim_std": metrics["val_ssim"][1],
+    "test_ssim_mean": metrics["test_ssim"][0],
+    "test_ssim_std": metrics["test_ssim"][1],
     "classification_train_accuracy_mean": metrics["classification_train_accuracy"][0],
     "classification_train_accuracy_std": metrics["classification_train_accuracy"][1],
     "classification_val_accuracy_mean": metrics["classification_val_accuracy"][0],
@@ -320,6 +355,9 @@ for metric_name in (
     "train_psnr",
     "val_psnr",
     "test_psnr",
+    "train_ssim",
+    "val_ssim",
+    "test_ssim",
     "classification_train_accuracy",
     "classification_val_accuracy",
     "classification_test_accuracy",
@@ -338,7 +376,8 @@ if append_final_results == 1:
         "experiment_id", "run_type", "mode", "k_folds", "epochs", "batch_size",
         "learning_rate", "noise_type", "noise_std", "latent_channels", "max_samples",
         "max_test_samples", "train_mse", "val_mse", "test_mse", "train_psnr", "val_psnr",
-        "test_psnr", "classification_train_accuracy", "classification_val_accuracy",
+        "test_psnr", "train_ssim", "val_ssim", "test_ssim",
+        "classification_train_accuracy", "classification_val_accuracy",
         "classification_test_accuracy", "notes"
     ]
 
@@ -381,6 +420,9 @@ if append_final_results == 1:
         "train_psnr": "" if metrics["train_psnr"][0] == "" else f"{metrics['train_psnr'][0]:.6f}",
         "val_psnr": "" if metrics["val_psnr"][0] == "" else f"{metrics['val_psnr'][0]:.6f}",
         "test_psnr": "" if metrics["test_psnr"][0] == "" else f"{metrics['test_psnr'][0]:.6f}",
+        "train_ssim": "" if metrics["train_ssim"][0] == "" else f"{metrics['train_ssim'][0]:.6f}",
+        "val_ssim": "" if metrics["val_ssim"][0] == "" else f"{metrics['val_ssim'][0]:.6f}",
+        "test_ssim": "" if metrics["test_ssim"][0] == "" else f"{metrics['test_ssim'][0]:.6f}",
         "classification_train_accuracy": "" if metrics["classification_train_accuracy"][0] == "" else f"{metrics['classification_train_accuracy'][0]:.6f}",
         "classification_val_accuracy": "" if metrics["classification_val_accuracy"][0] == "" else f"{metrics['classification_val_accuracy'][0]:.6f}",
         "classification_test_accuracy": "" if metrics["classification_test_accuracy"][0] == "" else f"{metrics['classification_test_accuracy'][0]:.6f}",

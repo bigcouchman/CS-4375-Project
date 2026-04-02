@@ -83,7 +83,7 @@ def _summarize_eval_folds(fold_results: list[dict[str, float]]) -> dict[str, flo
         psnr_mean = float("inf")
         psnr_std = 0.0
 
-    return {
+    summary = {
         "val_mse_mean": float(np.mean(val_mse)),
         "val_mse_std": float(np.std(val_mse)),
         "val_rmse_mean": float(np.mean(val_rmse)),
@@ -91,6 +91,13 @@ def _summarize_eval_folds(fold_results: list[dict[str, float]]) -> dict[str, flo
         "val_psnr_mean": psnr_mean,
         "val_psnr_std": psnr_std,
     }
+
+    if fold_results and all("val_ssim" in row for row in fold_results):
+        val_ssim = np.asarray([row["val_ssim"] for row in fold_results], dtype=np.float64)
+        summary["val_ssim_mean"] = float(np.mean(val_ssim))
+        summary["val_ssim_std"] = float(np.std(val_ssim))
+
+    return summary
 
 
 def _print_kfold_eval_report(
@@ -101,12 +108,15 @@ def _print_kfold_eval_report(
     print("Fold |     MSE      |     RMSE     |   PSNR (dB)")
     print("-----+--------------+--------------+-------------")
     for row in fold_results:
-        print(
+        row_message = (
             f"{int(row['fold']):>4} | "
             f"{row['val_mse']:.8f} | "
             f"{row['val_rmse']:.8f} | "
             f"{row['val_psnr']:.6f}"
         )
+        if "val_ssim" in row:
+            row_message += f" | SSIM={row['val_ssim']:.6f}"
+        print(row_message)
     print("-----+--------------+--------------+-------------")
     print(
         "Mean+/-Std | "
@@ -114,6 +124,8 @@ def _print_kfold_eval_report(
         f"{summary['val_rmse_mean']:.8f} +/- {summary['val_rmse_std']:.8f} | "
         f"{summary['val_psnr_mean']:.6f} +/- {summary['val_psnr_std']:.6f}"
     )
+    if "val_ssim_mean" in summary and "val_ssim_std" in summary:
+        print(f"SSIM mean+/-std: {summary['val_ssim_mean']:.6f} +/- {summary['val_ssim_std']:.6f}")
 
 
 def _write_kfold_eval_csv(
@@ -125,7 +137,15 @@ def _write_kfold_eval_csv(
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        fieldnames = ["row_type", "fold", "val_samples", "val_mse", "val_rmse", "val_psnr"]
+        fieldnames = [
+            "row_type",
+            "fold",
+            "val_samples",
+            "val_mse",
+            "val_rmse",
+            "val_psnr",
+            "val_ssim",
+        ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -138,6 +158,9 @@ def _write_kfold_eval_csv(
                     "val_mse": f"{row['val_mse']:.10f}",
                     "val_rmse": f"{row['val_rmse']:.10f}",
                     "val_psnr": f"{row['val_psnr']:.10f}",
+                    "val_ssim": (
+                        f"{float(row['val_ssim']):.10f}" if "val_ssim" in row else ""
+                    ),
                 }
             )
 
@@ -149,6 +172,9 @@ def _write_kfold_eval_csv(
                 "val_mse": f"{summary['val_mse_mean']:.10f}",
                 "val_rmse": f"{summary['val_rmse_mean']:.10f}",
                 "val_psnr": f"{summary['val_psnr_mean']:.10f}",
+                "val_ssim": (
+                    f"{summary['val_ssim_mean']:.10f}" if "val_ssim_mean" in summary else ""
+                ),
             }
         )
         writer.writerow(
@@ -159,6 +185,9 @@ def _write_kfold_eval_csv(
                 "val_mse": f"{summary['val_mse_std']:.10f}",
                 "val_rmse": f"{summary['val_rmse_std']:.10f}",
                 "val_psnr": f"{summary['val_psnr_std']:.10f}",
+                "val_ssim": (
+                    f"{summary['val_ssim_std']:.10f}" if "val_ssim_std" in summary else ""
+                ),
             }
         )
 
@@ -175,6 +204,7 @@ def run_kfold_evaluation_only(
     noise_std: float = 0.1,
     salt_pepper_amount: float = 0.01,
     output_csv_path: str | Path | None = None,
+    track_ssim: bool = False,
 ) -> dict[str, object]:
     if clean_images.ndim != 4:
         raise ValueError("clean_images must have shape (N, H, W, C).")
@@ -212,17 +242,20 @@ def run_kfold_evaluation_only(
             noisy_images=noisy_val,
             clean_images=clean_val,
             batch_size=batch_size,
+            include_ssim=track_ssim,
         )
 
-        fold_results.append(
-            {
-                "fold": int(fold_number),
-                "val_samples": int(clean_val.shape[0]),
-                "val_mse": float(fold_metrics["mse"]),
-                "val_rmse": float(fold_metrics["rmse"]),
-                "val_psnr": float(fold_metrics["psnr"]),
-            }
-        )
+        fold_row: dict[str, float] = {
+            "fold": int(fold_number),
+            "val_samples": int(clean_val.shape[0]),
+            "val_mse": float(fold_metrics["mse"]),
+            "val_rmse": float(fold_metrics["rmse"]),
+            "val_psnr": float(fold_metrics["psnr"]),
+        }
+        if track_ssim:
+            fold_row["val_ssim"] = float(fold_metrics.get("ssim", float("nan")))
+
+        fold_results.append(fold_row)
 
     summary = _summarize_eval_folds(fold_results)
     _print_kfold_eval_report(fold_results, summary)
@@ -279,6 +312,11 @@ def run_kfold_experiment(
     class_names: list[str] | None = None,
     save_loss_curves: bool = False,
     loss_curve_output_path: str | Path | None = None,
+    noise_type: str = "gaussian",
+    salt_pepper_amount: float = 0.01,
+    batch_noise_std_options: tuple[float, ...] | None = None,
+    sample_noise_per_batch: bool = False,
+    track_ssim: bool = False,
 ) -> list[dict[str, object]]:
     if clean_images.shape != noisy_images.shape:
         raise ValueError("Clean and noisy arrays must have matching shapes.")
@@ -316,6 +354,11 @@ def run_kfold_experiment(
             min_delta=min_delta,
             clean_test=clean_test,
             noisy_test=noisy_test,
+            noise_type=noise_type,
+            salt_pepper_amount=salt_pepper_amount,
+            batch_noise_std_options=batch_noise_std_options,
+            sample_noise_per_batch=sample_noise_per_batch,
+            track_ssim=track_ssim,
         )
 
         if run_classification and train_labels is not None:

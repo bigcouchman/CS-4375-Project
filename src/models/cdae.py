@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .layers import Conv2D, ReLU, Sigmoid
+from .layers import Conv2D, NearestUpsample2D, ReLU, Sigmoid
 
 
 class CDAE:
@@ -13,44 +13,54 @@ class CDAE:
     def __init__(
         self,
         input_channels: int = 3,
-        latent_channels: int = 32,
+        latent_channels: int = 64,
         seed: int = 42,
+        l1_weight: float = 0.0,
+        skip_connection_weight: float = 0.7,
     ) -> None:
         self.input_channels = input_channels
         self.latent_channels = latent_channels
+        self.l1_weight = max(0.0, float(l1_weight))
+        self.skip_connection_weight = float(np.clip(skip_connection_weight, 0.0, 0.95))
 
         self.encoder_conv = Conv2D(
             in_channels=input_channels,
-            out_channels=16,
+            out_channels=32,
             kernel_size=3,
             padding=1,
+            stride=1,
             seed=seed,
         )
         self.encoder_act = ReLU()
 
         self.bottleneck_conv = Conv2D(
-            in_channels=16,
+            in_channels=32,
             out_channels=latent_channels,
             kernel_size=3,
             padding=1,
+            stride=2,
             seed=seed + 1,
         )
         self.bottleneck_act = ReLU()
 
+        self.decoder_upsample = NearestUpsample2D(scale=2)
+
         self.decoder_conv = Conv2D(
             in_channels=latent_channels,
-            out_channels=16,
+            out_channels=32,
             kernel_size=3,
             padding=1,
+            stride=1,
             seed=seed + 2,
         )
         self.decoder_act = ReLU()
 
         self.output_conv = Conv2D(
-            in_channels=16,
+            in_channels=32,
             out_channels=input_channels,
             kernel_size=3,
             padding=1,
+            stride=1,
             seed=seed + 3,
         )
         self.output_act = Sigmoid()
@@ -62,12 +72,22 @@ class CDAE:
         x = self.bottleneck_conv.forward(x)
         x = self.bottleneck_act.forward(x)
 
+        x = self.decoder_upsample.forward(x)
+
         x = self.decoder_conv.forward(x)
         x = self.decoder_act.forward(x)
 
         x = self.output_conv.forward(x)
-        x = self.output_act.forward(x)
-        return x
+        decoded = self.output_act.forward(x)
+
+        if self.skip_connection_weight > 0.0:
+            reconstructed = (
+                (1.0 - self.skip_connection_weight) * decoded
+                + self.skip_connection_weight * noisy_images
+            ).astype(np.float32)
+            return np.clip(reconstructed, 0.0, 1.0)
+
+        return decoded
 
     @staticmethod
     def mse_loss(predictions: np.ndarray, targets: np.ndarray) -> float:
@@ -77,9 +97,28 @@ class CDAE:
     def mse_grad(predictions: np.ndarray, targets: np.ndarray) -> np.ndarray:
         return (2.0 / predictions.size) * (predictions - targets)
 
+    @staticmethod
+    def mae_loss(predictions: np.ndarray, targets: np.ndarray) -> float:
+        return float(np.mean(np.abs(predictions - targets)))
+
+    @staticmethod
+    def mae_grad(predictions: np.ndarray, targets: np.ndarray) -> np.ndarray:
+        return np.sign(predictions - targets) / predictions.size
+
+    def loss_and_grad(self, predictions: np.ndarray, targets: np.ndarray) -> tuple[float, np.ndarray]:
+        mse_value = self.mse_loss(predictions, targets)
+        grad = self.mse_grad(predictions, targets)
+
+        if self.l1_weight <= 0.0:
+            return mse_value, grad
+
+        mae_value = self.mae_loss(predictions, targets)
+        grad = grad + (self.l1_weight * self.mae_grad(predictions, targets))
+        return float(mse_value + (self.l1_weight * mae_value)), grad.astype(np.float32)
+
     def train_step(self, noisy_batch: np.ndarray, clean_batch: np.ndarray) -> tuple[float, np.ndarray]:
         reconstructed = self.forward(noisy_batch)
-        loss = self.mse_loss(reconstructed, clean_batch)
+        loss, _ = self.loss_and_grad(reconstructed, clean_batch)
         return loss, reconstructed
 
     def backward_and_update(
@@ -88,11 +127,17 @@ class CDAE:
         learning_rate: float,
         weight_decay: float = 0.0,
     ) -> None:
-        grad = self.output_act.backward(loss_grad)
+        grad = loss_grad
+        if self.skip_connection_weight > 0.0:
+            grad = grad * (1.0 - self.skip_connection_weight)
+
+        grad = self.output_act.backward(grad)
         grad = self.output_conv.backward(grad)
 
         grad = self.decoder_act.backward(grad)
         grad = self.decoder_conv.backward(grad)
+
+        grad = self.decoder_upsample.backward(grad)
 
         grad = self.bottleneck_act.backward(grad)
         grad = self.bottleneck_conv.backward(grad)
@@ -109,6 +154,8 @@ class CDAE:
         return {
             "meta_input_channels": np.asarray([self.input_channels], dtype=np.int64),
             "meta_latent_channels": np.asarray([self.latent_channels], dtype=np.int64),
+            "meta_l1_weight": np.asarray([self.l1_weight], dtype=np.float32),
+            "meta_skip_connection_weight": np.asarray([self.skip_connection_weight], dtype=np.float32),
             "encoder_conv.weights": self.encoder_conv.weights.copy(),
             "encoder_conv.bias": self.encoder_conv.bias.copy(),
             "bottleneck_conv.weights": self.bottleneck_conv.weights.copy(),
@@ -133,6 +180,14 @@ class CDAE:
             raise ValueError(
                 "Checkpoint latent_channels does not match current model. "
                 f"Checkpoint={expected_latent_channels}, current={self.latent_channels}."
+            )
+
+        if "meta_l1_weight" in state:
+            self.l1_weight = float(np.asarray(state["meta_l1_weight"]).ravel()[0])
+
+        if "meta_skip_connection_weight" in state:
+            self.skip_connection_weight = float(
+                np.asarray(state["meta_skip_connection_weight"]).ravel()[0]
             )
 
         self.encoder_conv.weights = np.asarray(state["encoder_conv.weights"], dtype=np.float32).copy()

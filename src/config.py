@@ -24,14 +24,14 @@ class ModelConfig:
     input_height: int = 32
     input_width: int = 32
     input_channels: int = 3
-    latent_channels: int = 32
+    latent_channels: int = 64
 
 
 @dataclass
 class TrainConfig:
     mode: str = "kfold"
     k_folds: int = 5
-    epochs: int = 10
+    epochs: int = 30
     batch_size: int = 64
     learning_rate: float = 1e-3
     random_seed: int = 42

@@ -41,7 +41,7 @@ CIFAR10_CLASS_NAMES = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CDAE CIFAR-10 denoising with custom NumPy layers")
     parser.add_argument("--mode", choices=["kfold", "single", "kfold_eval"], default="kfold")
-    parser.add_argument("--model-type", choices=["conv", "fc"], default="fc")
+    parser.add_argument("--model-type", choices=["conv", "fc"], default="conv")
     parser.add_argument("--fc-hidden-dim", type=int, default=512)
     parser.add_argument("--fc-bottleneck-dim", type=int, default=128)
     parser.add_argument("--data-root", type=str, default="data")
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         help="Download CIFAR-10 automatically via torchvision on first run.",
     )
     parser.add_argument("--k-folds", type=int, default=5)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--lr-decay", type=float, default=1.0)
@@ -60,9 +60,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stopping-patience", type=int, default=0)
     parser.add_argument("--min-delta", type=float, default=0.0)
-    parser.add_argument("--latent-channels", type=int, default=32)
+    parser.add_argument("--latent-channels", type=int, default=64)
+    parser.add_argument(
+        "--conv-skip-connection-weight",
+        type=float,
+        default=0.7,
+        help="Residual blend weight for conv model output: final=(1-w)*decoded + w*noisy.",
+    )
+    parser.add_argument(
+        "--l1-weight",
+        type=float,
+        default=0.1,
+        help="Optional L1 term weight in reconstruction loss: loss = MSE + l1_weight * MAE",
+    )
     parser.add_argument("--noise-type", choices=["gaussian", "salt_pepper"], default="gaussian")
     parser.add_argument("--noise-std", type=float, default=0.1)
+    parser.add_argument(
+        "--sample-noise-per-batch",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="For gaussian noise, resample std per mini-batch from --batch-noise-std-options.",
+    )
+    parser.add_argument(
+        "--batch-noise-std-options",
+        type=str,
+        default="0.05,0.1",
+        help="Comma-separated std values used when --sample-noise-per-batch is enabled.",
+    )
     parser.add_argument("--salt-pepper-amount", type=float, default=0.01)
     parser.add_argument("--max-samples", type=int, default=1000)
     parser.add_argument("--max-test-samples", type=int, default=1000)
@@ -99,6 +123,12 @@ def parse_args() -> argparse.Namespace:
         default="reports/tables/test_predictions_sample.csv",
     )
     parser.add_argument("--num-prediction-samples", type=int, default=100)
+    parser.add_argument(
+        "--track-ssim",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Compute SSIM in addition to MSE/RMSE/PSNR.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -109,9 +139,11 @@ def summarize_fold_results(fold_results: list[dict[str, object]]) -> dict[str, f
         "val_mse",
         "val_rmse",
         "val_psnr",
+        "val_ssim",
         "test_mse",
         "test_rmse",
         "test_psnr",
+        "test_ssim",
         "classification_train_accuracy",
         "classification_val_accuracy",
         "classification_test_accuracy",
@@ -143,6 +175,23 @@ def create_noisy_images(
         amount=salt_pepper_amount,
         seed=seed,
     )
+
+
+def parse_batch_noise_std_options(raw_options: str) -> tuple[float, ...]:
+    cleaned_options: list[float] = []
+    for token in raw_options.split(","):
+        token = token.strip()
+        if token == "":
+            continue
+        value = float(token)
+        if value <= 0.0:
+            raise ValueError("All --batch-noise-std-options values must be > 0.")
+        cleaned_options.append(value)
+
+    if not cleaned_options:
+        return tuple()
+
+    return tuple(cleaned_options)
 
 
 def write_prediction_samples(
@@ -213,12 +262,16 @@ def make_log_row(
         "salt_pepper_amount": args.salt_pepper_amount,
         "model_type": args.model_type,
         "latent_channels": args.latent_channels,
+        "conv_skip_connection_weight": args.conv_skip_connection_weight,
         "fc_hidden_dim": args.fc_hidden_dim,
         "fc_bottleneck_dim": args.fc_bottleneck_dim,
+        "l1_weight": args.l1_weight,
         "resize_to": args.resize_to,
         "random_subset": int(args.random_subset),
         "max_samples": args.max_samples,
         "max_test_samples": args.max_test_samples,
+        "sample_noise_per_batch": int(args.sample_noise_per_batch),
+        "batch_noise_std_options": args.batch_noise_std_options,
         "resume_checkpoint": args.resume_checkpoint,
         "checkpoint_path": checkpoint_path,
         "run_classification": int(args.run_classification),
@@ -239,6 +292,9 @@ def make_log_row(
         "train_psnr": result.get("train_psnr", ""),
         "val_psnr": result.get("val_psnr", ""),
         "test_psnr": result.get("test_psnr", ""),
+        "train_ssim": result.get("train_ssim", ""),
+        "val_ssim": result.get("val_ssim", ""),
+        "test_ssim": result.get("test_ssim", ""),
         "figure_path": result.get("figure_path", ""),
         "loss_curve_path": result.get("loss_curve_path", ""),
         "predictions_path": result.get("predictions_path", ""),
@@ -323,6 +379,8 @@ def main() -> None:
                 input_channels=int(clean_images.shape[-1]),
                 latent_channels=args.latent_channels,
                 seed=cfg.train.random_seed,
+                l1_weight=args.l1_weight,
+                skip_connection_weight=args.conv_skip_connection_weight,
             )
         else:
             model = FullyConnectedDAE(
@@ -335,6 +393,7 @@ def main() -> None:
                 bottleneck_dim=args.fc_bottleneck_dim,
                 seed=cfg.train.random_seed,
                 skip_connection_weight=0.2,
+                l1_weight=args.l1_weight,
             )
 
         if args.resume_checkpoint:
@@ -345,6 +404,7 @@ def main() -> None:
 
     logger = ExperimentLogger(cfg.paths.logs_csv_path)
     next_experiment_id = logger.next_experiment_id()
+    batch_noise_std_options = parse_batch_noise_std_options(args.batch_noise_std_options)
 
     if cfg.train.mode == "kfold_eval":
         if not args.resume_checkpoint:
@@ -363,6 +423,7 @@ def main() -> None:
             noise_std=cfg.noise.std,
             salt_pepper_amount=args.salt_pepper_amount,
             output_csv_path=args.kfold_eval_output,
+            track_ssim=args.track_ssim,
         )
 
         fold_results = [
@@ -401,6 +462,11 @@ def main() -> None:
             f"  val_psnr: {float(eval_summary.get('val_psnr_mean', float('nan'))):.6f} "
             f"+/- {float(eval_summary.get('val_psnr_std', float('nan'))):.6f}"
         )
+        if args.track_ssim:
+            print(
+                f"  val_ssim: {float(eval_summary.get('val_ssim_mean', float('nan'))):.6f} "
+                f"+/- {float(eval_summary.get('val_ssim_std', float('nan'))):.6f}"
+            )
         return
 
     noisy_images = create_noisy_images(
@@ -458,6 +524,11 @@ def main() -> None:
             class_names=CIFAR10_CLASS_NAMES,
             save_loss_curves=args.save_loss_curve,
             loss_curve_output_path=cfg.paths.figure_output_dir / args.loss_curve_name,
+            noise_type=cfg.noise.noise_type,
+            salt_pepper_amount=args.salt_pepper_amount,
+            batch_noise_std_options=batch_noise_std_options,
+            sample_noise_per_batch=args.sample_noise_per_batch,
+            track_ssim=args.track_ssim,
         )
 
         for result in fold_results:
@@ -548,6 +619,11 @@ def main() -> None:
             min_delta=args.min_delta,
             noisy_test=noisy_test_images,
             clean_test=clean_test_images,
+            noise_type=cfg.noise.noise_type,
+            salt_pepper_amount=args.salt_pepper_amount,
+            batch_noise_std_options=batch_noise_std_options,
+            sample_noise_per_batch=args.sample_noise_per_batch,
+            track_ssim=args.track_ssim,
         )
 
         classification_result: dict[str, object] = {}
@@ -643,6 +719,11 @@ def main() -> None:
         print(f"  val_psnr: {result['val_psnr']:.6f}")
         if "test_psnr" in result:
             print(f"  test_psnr: {result['test_psnr']:.6f}")
+        if args.track_ssim:
+            print(f"  train_ssim: {float(result.get('train_ssim', float('nan'))):.6f}")
+            print(f"  val_ssim: {float(result.get('val_ssim', float('nan'))):.6f}")
+            if "test_ssim" in result:
+                print(f"  test_ssim: {float(result.get('test_ssim', float('nan'))):.6f}")
 
         if args.run_classification:
             print("\nClassification Summary:")

@@ -10,14 +10,15 @@ Image denoising using custom NumPy autoencoders on CIFAR-10.
 ## Technique Summary
 - Add controlled noise to clean images.
 - Train encoder-decoder network to reconstruct clean images from noisy inputs.
-- Train using **MSE loss**.
+- Train using **MSE** or optional hybrid **MSE + L1** reconstruction loss.
 - Use **K-Fold Cross Validation** (default K=5) for more reliable performance estimates.
 - Train a custom **NumPy Softmax Classifier** on denoised images to predict object class.
 
 ## Algorithms Implemented
 - Custom NumPy Conv2D (forward + backward + updates)
-- Custom NumPy convolutional DAE (encoder/decoder + backprop)
+- Custom NumPy convolutional DAE with spatial bottleneck
 - Custom NumPy fully connected DAE (configurable): input_dim -> hidden -> bottleneck -> hidden -> input_dim
+- Optional hybrid reconstruction loss: `loss = MSE + l1_weight * MAE`
 - Custom NumPy Softmax Regression classifier (multiclass prediction)
 
 ## Dataset
@@ -89,6 +90,9 @@ CS-4375-Project/
 ## Setup
 
 From project root:
+
+Recommended Python version for easiest dependency resolution:
+- Python 3.9 to 3.12
 
 ### macOS/Linux
 
@@ -164,10 +168,13 @@ Default behavior:
 - Verifies `torchvision` in `.venv` before training/evaluation
 - Uses optimized defaults for course-scale experiments:
 	- mode: `single` (one new experiment row)
-	- model: `fc` (fully connected DAE, 1024 -> 256 bottleneck)
+	- model: `conv` (NumPy convolutional DAE, 3->32->64 bottleneck->32->3)
 	- train/test subset: `10000/2500`
 	- image size: `32x32` (no downsampling)
 	- noise: gaussian with adjustable std
+	- per-batch gaussian noise scheduling (optional): `FULL_SAMPLE_NOISE_PER_BATCH=1` with `FULL_BATCH_NOISE_STD_OPTIONS=0.05,0.1`
+	- hybrid denoising loss (optional): `FULL_L1_WEIGHT=0.1` gives `MSE + 0.1 * MAE`
+	- SSIM tracking (optional): `FULL_TRACK_SSIM=1`
 - Keeps denoising as the primary objective while reporting classification accuracy by default (`FULL_RUN_CLASSIFICATION=1`)
 - Saves checkpoint(s), denoising figure(s), loss curve(s), summary table(s), and prediction CSV(s)
 - Default checkpoint: `experiments/checkpoints/cdae_denoise_focus.npz`
@@ -197,6 +204,10 @@ FULL_EPOCHS=5 bash scripts/run_full_dataset.sh
 FULL_MODEL_TYPE=conv bash scripts/run_full_dataset.sh
 FULL_MAX_SAMPLES=4000 FULL_MAX_TEST_SAMPLES=1000 bash scripts/run_full_dataset.sh
 FULL_NOISE_STD=0.2 bash scripts/run_full_dataset.sh
+FULL_SAMPLE_NOISE_PER_BATCH=1 FULL_BATCH_NOISE_STD_OPTIONS=0.05,0.1 bash scripts/run_full_dataset.sh
+FULL_L1_WEIGHT=0.1 bash scripts/run_full_dataset.sh
+FULL_TRACK_SSIM=1 bash scripts/run_full_dataset.sh
+FULL_CONV_SKIP_CONNECTION_WEIGHT=0.85 bash scripts/run_full_dataset.sh
 FULL_RESIZE_TO=32 bash scripts/run_full_dataset.sh
 FULL_RUN_CLASSIFICATION=0 bash scripts/run_full_dataset.sh
 FULL_MODE=kfold_eval FULL_K_FOLDS=3 FULL_KFOLD_EVAL_OUTPUT=reports/tables/kfold_eval_summary_latest.csv bash scripts/run_full_dataset.sh
@@ -229,6 +240,18 @@ Logged fields include:
 - experiment number
 - denoiser hyperparameters
 - noise configuration
-- train/validation/test denoising metrics (MSE/RMSE/PSNR)
+- train/validation/test denoising metrics (MSE/RMSE/PSNR, optional SSIM)
 - train/validation/test classification accuracy
 - checkpoint paths and run notes
+
+## Denoising Results Snapshot
+
+Recent measured runs from `experiments/logs/experiment_runs.csv`:
+
+- Baseline FC run (id=1, 10k/2.5k subset):
+	- val_psnr = 13.6659 dB
+	- test_psnr = 13.7179 dB
+- Upgraded Conv run (id=5, quick benchmark on 1k/500 subset):
+	- val_psnr = 20.7215 dB
+	- test_psnr = 20.6975 dB
+	- classification_test_accuracy = 0.2720

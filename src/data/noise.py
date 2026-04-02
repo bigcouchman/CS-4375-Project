@@ -13,6 +13,23 @@ def add_gaussian_noise(
     return np.clip(noisy, 0.0, 1.0).astype(np.float32)
 
 
+def sample_gaussian_noise_std(
+    std_options: list[float] | tuple[float, ...],
+    rng: np.random.Generator,
+) -> float:
+    if len(std_options) == 0:
+        raise ValueError("std_options must contain at least one value.")
+
+    cleaned = []
+    for std in std_options:
+        std_value = float(std)
+        if std_value <= 0.0:
+            raise ValueError("All Gaussian std options must be > 0.")
+        cleaned.append(std_value)
+
+    return float(rng.choice(np.asarray(cleaned, dtype=np.float32)))
+
+
 def add_salt_pepper_noise(
     images: np.ndarray,
     amount: float = 0.01,

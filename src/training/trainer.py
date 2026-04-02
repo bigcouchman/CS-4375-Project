@@ -5,6 +5,9 @@ from typing import Any
 
 import numpy as np
 
+from src.data import add_gaussian_noise, add_salt_pepper_noise, sample_gaussian_noise_std
+from src.evaluation.metrics import ssim
+
 
 def iterate_minibatches(
     noisy_images: np.ndarray,
@@ -29,6 +32,7 @@ def compute_metrics(
     noisy_images: np.ndarray,
     clean_images: np.ndarray,
     batch_size: int,
+    include_ssim: bool = False,
 ) -> dict[str, float]:
     if noisy_images.shape != clean_images.shape:
         raise ValueError("Noisy and clean image arrays must have identical shapes.")
@@ -37,6 +41,8 @@ def compute_metrics(
 
     total_squared_error = 0.0
     total_elements = 0
+    total_ssim = 0.0
+    total_samples = 0
 
     for start in range(0, noisy_images.shape[0], batch_size):
         end = min(start + batch_size, noisy_images.shape[0])
@@ -48,6 +54,11 @@ def compute_metrics(
 
         total_squared_error += float(np.sum(diff * diff, dtype=np.float64))
         total_elements += int(diff.size)
+        total_samples += int(clean_batch.shape[0])
+
+        if include_ssim:
+            batch_ssim = ssim(clean_batch, reconstructed_batch)
+            total_ssim += float(batch_ssim) * int(clean_batch.shape[0])
 
     mse_value = float(total_squared_error / max(total_elements, 1))
     rmse_value = float(np.sqrt(mse_value))
@@ -57,11 +68,16 @@ def compute_metrics(
         else float(20.0 * np.log10(1.0) - 10.0 * np.log10(mse_value))
     )
 
-    return {
+    metrics = {
         "mse": mse_value,
         "rmse": rmse_value,
         "psnr": psnr_value,
     }
+
+    if include_ssim:
+        metrics["ssim"] = float(total_ssim / max(total_samples, 1))
+
+    return metrics
 
 
 def train_fold(
@@ -81,9 +97,15 @@ def train_fold(
     min_delta: float = 0.0,
     noisy_test: np.ndarray | None = None,
     clean_test: np.ndarray | None = None,
+    noise_type: str = "gaussian",
+    salt_pepper_amount: float = 0.01,
+    batch_noise_std_options: tuple[float, ...] | None = None,
+    sample_noise_per_batch: bool = False,
+    track_ssim: bool = False,
 ) -> dict[str, object]:
     history: list[dict[str, float]] = []
     current_learning_rate = learning_rate
+    noise_rng = np.random.default_rng(seed + 10_000)
 
     best_val_mse = float("inf")
     best_epoch = 0
@@ -95,6 +117,7 @@ def train_fold(
 
     for epoch in range(1, epochs + 1):
         batch_losses: list[float] = []
+        sampled_noise_stds: list[float] = []
 
         for noisy_batch, clean_batch in iterate_minibatches(
             noisy_train,
@@ -102,35 +125,75 @@ def train_fold(
             batch_size=batch_size,
             seed=seed + epoch,
         ):
-            batch_loss, reconstructed = model.train_step(noisy_batch, clean_batch)
+            current_noisy_batch = noisy_batch
+            if sample_noise_per_batch and noise_type == "gaussian" and batch_noise_std_options:
+                sampled_std = sample_gaussian_noise_std(list(batch_noise_std_options), noise_rng)
+                sampled_noise_stds.append(sampled_std)
+                current_noisy_batch = add_gaussian_noise(
+                    clean_batch,
+                    std=sampled_std,
+                    seed=int(noise_rng.integers(0, np.iinfo(np.int32).max)),
+                )
+            elif sample_noise_per_batch and noise_type == "salt_pepper":
+                current_noisy_batch = add_salt_pepper_noise(
+                    clean_batch,
+                    amount=salt_pepper_amount,
+                    seed=int(noise_rng.integers(0, np.iinfo(np.int32).max)),
+                )
+
+            if hasattr(model, "loss_and_grad"):
+                reconstructed = model.forward(current_noisy_batch)
+                batch_loss, loss_grad = model.loss_and_grad(reconstructed, clean_batch)
+            else:
+                batch_loss, reconstructed = model.train_step(current_noisy_batch, clean_batch)
+                loss_grad = model.mse_grad(reconstructed, clean_batch)
+
             batch_losses.append(batch_loss)
 
-            loss_grad = model.mse_grad(reconstructed, clean_batch)
             model.backward_and_update(
                 loss_grad,
                 current_learning_rate,
                 weight_decay=weight_decay,
             )
 
-        train_metrics = compute_metrics(model, noisy_train, clean_train, batch_size=batch_size)
-        val_metrics = compute_metrics(model, noisy_val, clean_val, batch_size=batch_size)
+        train_metrics = compute_metrics(
+            model,
+            noisy_train,
+            clean_train,
+            batch_size=batch_size,
+            include_ssim=track_ssim,
+        )
+        val_metrics = compute_metrics(
+            model,
+            noisy_val,
+            clean_val,
+            batch_size=batch_size,
+            include_ssim=track_ssim,
+        )
 
         train_mse_value = train_metrics["mse"]
         val_mse_value = val_metrics["mse"]
 
-        history.append(
-            {
-                "epoch": float(epoch),
-                "batch_loss_mean": float(np.mean(batch_losses)),
-                "learning_rate": float(current_learning_rate),
-                "train_mse": float(train_metrics["mse"]),
-                "val_mse": float(val_metrics["mse"]),
-                "train_rmse": float(train_metrics["rmse"]),
-                "val_rmse": float(val_metrics["rmse"]),
-                "train_psnr": float(train_metrics["psnr"]),
-                "val_psnr": float(val_metrics["psnr"]),
-            }
-        )
+        history_entry = {
+            "epoch": float(epoch),
+            "batch_loss_mean": float(np.mean(batch_losses)),
+            "learning_rate": float(current_learning_rate),
+            "train_mse": float(train_metrics["mse"]),
+            "val_mse": float(val_metrics["mse"]),
+            "train_rmse": float(train_metrics["rmse"]),
+            "val_rmse": float(val_metrics["rmse"]),
+            "train_psnr": float(train_metrics["psnr"]),
+            "val_psnr": float(val_metrics["psnr"]),
+        }
+
+        if track_ssim:
+            history_entry["train_ssim"] = float(train_metrics.get("ssim", float("nan")))
+            history_entry["val_ssim"] = float(val_metrics.get("ssim", float("nan")))
+
+        if sampled_noise_stds:
+            history_entry["batch_noise_std_mean"] = float(np.mean(sampled_noise_stds))
+
+        history.append(history_entry)
 
         print(
             f"Epoch {epoch:02d}/{epochs} | "
@@ -164,8 +227,20 @@ def train_fold(
         model.load_state_dict(best_state)
         print(f"[INFO] Restored best checkpoint from epoch {best_epoch} (val_mse={best_val_mse:.6f}).")
 
-    final_train_metrics = compute_metrics(model, noisy_train, clean_train, batch_size=batch_size)
-    final_val_metrics = compute_metrics(model, noisy_val, clean_val, batch_size=batch_size)
+    final_train_metrics = compute_metrics(
+        model,
+        noisy_train,
+        clean_train,
+        batch_size=batch_size,
+        include_ssim=track_ssim,
+    )
+    final_val_metrics = compute_metrics(
+        model,
+        noisy_val,
+        clean_val,
+        batch_size=batch_size,
+        include_ssim=track_ssim,
+    )
 
     if not history:
         best_val_mse = final_val_metrics["mse"]
@@ -184,10 +259,22 @@ def train_fold(
         "val_psnr": final_val_metrics["psnr"],
     }
 
+    if track_ssim:
+        result["train_ssim"] = final_train_metrics.get("ssim", float("nan"))
+        result["val_ssim"] = final_val_metrics.get("ssim", float("nan"))
+
     if noisy_test is not None and clean_test is not None:
-        final_test_metrics = compute_metrics(model, noisy_test, clean_test, batch_size=batch_size)
+        final_test_metrics = compute_metrics(
+            model,
+            noisy_test,
+            clean_test,
+            batch_size=batch_size,
+            include_ssim=track_ssim,
+        )
         result["test_mse"] = final_test_metrics["mse"]
         result["test_rmse"] = final_test_metrics["rmse"]
         result["test_psnr"] = final_test_metrics["psnr"]
+        if track_ssim:
+            result["test_ssim"] = final_test_metrics.get("ssim", float("nan"))
 
     return result

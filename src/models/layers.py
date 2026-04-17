@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from typing import cast
 
 
 class Conv2D:
@@ -157,7 +158,8 @@ class Sigmoid:
         self._output: np.ndarray | None = None
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        output = 1.0 / (1.0 + np.exp(-x))
+        clipped = np.clip(x, -30.0, 30.0)
+        output = 1.0 / (1.0 + np.exp(-clipped))
         self._output = output
         return output
 
@@ -180,7 +182,7 @@ class NearestUpsample2D:
         if x.ndim != 4:
             raise ValueError("NearestUpsample2D expects input with shape (N, H, W, C).")
 
-        self._cached_input_shape = x.shape
+        self._cached_input_shape = cast(tuple[int, int, int, int], x.shape)
         if self.scale == 1:
             return x.copy()
 

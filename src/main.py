@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+from collections.abc import Iterable
 
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -18,7 +19,7 @@ from src.data import (
     select_random_subset,
     validate_cifar10_dataset,
 )
-from src.evaluation.visualize import save_denoising_grid, save_loss_curve
+from src.evaluation.visualize import save_denoising_grid
 from src.models import CDAE, FullyConnectedDAE
 from src.training import run_kfold_evaluation_only, run_kfold_experiment, train_fold
 from src.utils import ExperimentLogger, set_global_seed
@@ -38,6 +39,49 @@ CIFAR10_CLASS_NAMES = [
 ]
 
 
+def _as_float(value: object, default: float = float("nan")) -> float:
+    if isinstance(value, (float, int, np.floating, np.integer)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value):
+            return int(value)
+        return default
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return default
+    return default
+
+
+def _as_object_dict(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _as_object_dict_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
+        return []
+
+    rows: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, dict):
+            rows.append({str(key): row_value for key, row_value in item.items()})
+    return rows
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CDAE CIFAR-10 denoising with custom NumPy layers")
     parser.add_argument("--mode", choices=["kfold", "single", "kfold_eval"], default="kfold")
@@ -55,22 +99,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--lr-decay", type=float, default=1.0)
+    parser.add_argument("--lr-decay", type=float, default=0.995)
     parser.add_argument("--lr-decay-every", type=int, default=0)
     parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--early-stopping-patience", type=int, default=0)
+    parser.add_argument("--early-stopping-patience", type=int, default=12)
     parser.add_argument("--min-delta", type=float, default=0.0)
-    parser.add_argument("--latent-channels", type=int, default=64)
+    parser.add_argument("--latent-channels", type=int, default=96)
     parser.add_argument(
         "--conv-skip-connection-weight",
         type=float,
-        default=0.7,
+        default=0.8,
         help="Residual blend weight for conv model output: final=(1-w)*decoded + w*noisy.",
     )
     parser.add_argument(
         "--l1-weight",
         type=float,
-        default=0.1,
+        default=0.0,
         help="Optional L1 term weight in reconstruction loss: loss = MSE + l1_weight * MAE",
     )
     parser.add_argument("--noise-type", choices=["gaussian", "salt_pepper"], default="gaussian")
@@ -88,8 +132,8 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated std values used when --sample-noise-per-batch is enabled.",
     )
     parser.add_argument("--salt-pepper-amount", type=float, default=0.01)
-    parser.add_argument("--max-samples", type=int, default=1000)
-    parser.add_argument("--max-test-samples", type=int, default=1000)
+    parser.add_argument("--max-samples", type=int, default=2000)
+    parser.add_argument("--max-test-samples", type=int, default=500)
     parser.add_argument("--resize-to", type=int, default=16)
     parser.add_argument(
         "--random-subset",
@@ -97,24 +141,79 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Randomly sample the requested subset size from train/test before training/evaluation.",
     )
-    parser.add_argument("--val-ratio", type=float, default=0.2)
+    parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--resume-checkpoint", type=str, default="")
     parser.add_argument("--save-checkpoint", type=str, default="")
-    parser.add_argument("--save-figure", action="store_true")
+    parser.add_argument(
+        "--save-figure",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save denoising figure output (enabled by default).",
+    )
     parser.add_argument("--figure-name", type=str, default="denoising_preview.png")
-    parser.add_argument("--save-loss-curve", action="store_true")
+    parser.add_argument(
+        "--save-loss-curve",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save training loss curve output (enabled by default).",
+    )
     parser.add_argument("--loss-curve-name", type=str, default="training_loss_curve.png")
+    parser.add_argument(
+        "--loss-curve-update-every",
+        type=int,
+        default=1,
+        help="Refresh the loss-curve image every N epochs during training.",
+    )
+    parser.add_argument(
+        "--train-metrics-max-samples",
+        type=int,
+        default=1024,
+        help=(
+            "Max number of train samples to use for per-epoch train metrics; "
+            "0 means full train split."
+        ),
+    )
+    parser.add_argument(
+        "--epoch-train-subset-min",
+        type=int,
+        default=1800,
+        help=(
+            "Per-epoch minimum training subset size sampled from the train split; "
+            "set 0 to disable dynamic per-epoch subset sampling."
+        ),
+    )
+    parser.add_argument(
+        "--epoch-train-subset-max",
+        type=int,
+        default=1800,
+        help=(
+            "Per-epoch maximum training subset size sampled from the train split; "
+            "set 0 to disable dynamic per-epoch subset sampling."
+        ),
+    )
     parser.add_argument(
         "--kfold-eval-output",
         type=str,
         default="reports/tables/kfold_eval_summary_latest.csv",
     )
-    parser.add_argument("--num-figure-images", type=int, default=8)
+    parser.add_argument("--num-figure-images", type=int, default=10)
     parser.add_argument("--run-classification", action="store_true")
     parser.add_argument("--classifier-epochs", type=int, default=20)
     parser.add_argument("--classifier-batch-size", type=int, default=64)
     parser.add_argument("--classifier-learning-rate", type=float, default=0.1)
     parser.add_argument("--classifier-weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--classifier-hidden-dims",
+        type=str,
+        default="128,64,32",
+        help="Comma-separated hidden layer sizes for classifier MLP; empty string disables hidden layers.",
+    )
+    parser.add_argument(
+        "--classifier-dropout",
+        type=float,
+        default=0.4,
+        help="Dropout rate for hidden layers in classifier MLP.",
+    )
     parser.add_argument("--classifier-seed", type=int, default=123)
     parser.add_argument("--save-predictions", action="store_true")
     parser.add_argument(
@@ -151,7 +250,12 @@ def summarize_fold_results(fold_results: list[dict[str, object]]) -> dict[str, f
     ]
 
     for metric_key in metric_keys:
-        values = [float(result[metric_key]) for result in fold_results if metric_key in result]
+        values = [
+            _as_float(result.get(metric_key), default=float("nan"))
+            for result in fold_results
+            if metric_key in result
+        ]
+        values = [value for value in values if np.isfinite(value)]
         if values:
             values_array = np.asarray(values, dtype=np.float64)
             summary[f"{metric_key}_mean"] = float(np.mean(values_array))
@@ -192,6 +296,20 @@ def parse_batch_noise_std_options(raw_options: str) -> tuple[float, ...]:
         return tuple()
 
     return tuple(cleaned_options)
+
+
+def parse_classifier_hidden_dims(raw_dims: str) -> tuple[int, ...]:
+    cleaned_dims: list[int] = []
+    for token in raw_dims.split(","):
+        token = token.strip()
+        if token == "":
+            continue
+        value = int(token)
+        if value <= 0:
+            raise ValueError("All --classifier-hidden-dims values must be > 0.")
+        cleaned_dims.append(value)
+
+    return tuple(cleaned_dims)
 
 
 def write_prediction_samples(
@@ -272,6 +390,8 @@ def make_log_row(
         "max_test_samples": args.max_test_samples,
         "sample_noise_per_batch": int(args.sample_noise_per_batch),
         "batch_noise_std_options": args.batch_noise_std_options,
+        "epoch_train_subset_min": args.epoch_train_subset_min,
+        "epoch_train_subset_max": args.epoch_train_subset_max,
         "resume_checkpoint": args.resume_checkpoint,
         "checkpoint_path": checkpoint_path,
         "run_classification": int(args.run_classification),
@@ -279,6 +399,8 @@ def make_log_row(
         "classifier_batch_size": args.classifier_batch_size,
         "classifier_learning_rate": args.classifier_learning_rate,
         "classifier_weight_decay": args.classifier_weight_decay,
+        "classifier_hidden_dims": args.classifier_hidden_dims,
+        "classifier_dropout": args.classifier_dropout,
         "classifier_final_loss": result.get("classifier_final_loss", ""),
         "classification_train_accuracy": result.get("classification_train_accuracy", ""),
         "classification_val_accuracy": result.get("classification_val_accuracy", ""),
@@ -405,6 +527,10 @@ def main() -> None:
     logger = ExperimentLogger(cfg.paths.logs_csv_path)
     next_experiment_id = logger.next_experiment_id()
     batch_noise_std_options = parse_batch_noise_std_options(args.batch_noise_std_options)
+    classifier_hidden_dims = parse_classifier_hidden_dims(args.classifier_hidden_dims)
+
+    if args.classifier_dropout < 0.0 or args.classifier_dropout >= 1.0:
+        raise ValueError("--classifier-dropout must satisfy 0.0 <= value < 1.0.")
 
     if cfg.train.mode == "kfold_eval":
         if not args.resume_checkpoint:
@@ -426,19 +552,16 @@ def main() -> None:
             track_ssim=args.track_ssim,
         )
 
-        fold_results = [
-            result
-            for result in eval_result.get("fold_results", [])
-            if isinstance(result, dict)
-        ]
+        fold_results = _as_object_dict_list(eval_result.get("fold_results", []))
         for result in fold_results:
+            fold_number = _as_int(result.get("fold"), default=0)
             logger.log_run(
                 make_log_row(
                     experiment_id=next_experiment_id,
                     result=result,
                     args=args,
                     mode="kfold_eval",
-                    fold=int(result["fold"]),
+                    fold=fold_number,
                     logger=logger,
                     checkpoint_path=args.resume_checkpoint,
                     train_sample_count=sample_count,
@@ -448,24 +571,24 @@ def main() -> None:
             )
             next_experiment_id += 1
 
-        eval_summary = eval_result.get("summary", {})
+        eval_summary = _as_object_dict(eval_result.get("summary", {}))
         print("\nK-Fold Evaluation Summary (mean +/- std):")
         print(
-            f"  val_mse: {float(eval_summary.get('val_mse_mean', float('nan'))):.8f} "
-            f"+/- {float(eval_summary.get('val_mse_std', float('nan'))):.8f}"
+            f"  val_mse: {_as_float(eval_summary.get('val_mse_mean'), default=float('nan')):.8f} "
+            f"+/- {_as_float(eval_summary.get('val_mse_std'), default=float('nan')):.8f}"
         )
         print(
-            f"  val_rmse: {float(eval_summary.get('val_rmse_mean', float('nan'))):.8f} "
-            f"+/- {float(eval_summary.get('val_rmse_std', float('nan'))):.8f}"
+            f"  val_rmse: {_as_float(eval_summary.get('val_rmse_mean'), default=float('nan')):.8f} "
+            f"+/- {_as_float(eval_summary.get('val_rmse_std'), default=float('nan')):.8f}"
         )
         print(
-            f"  val_psnr: {float(eval_summary.get('val_psnr_mean', float('nan'))):.6f} "
-            f"+/- {float(eval_summary.get('val_psnr_std', float('nan'))):.6f}"
+            f"  val_psnr: {_as_float(eval_summary.get('val_psnr_mean'), default=float('nan')):.6f} "
+            f"+/- {_as_float(eval_summary.get('val_psnr_std'), default=float('nan')):.6f}"
         )
         if args.track_ssim:
             print(
-                f"  val_ssim: {float(eval_summary.get('val_ssim_mean', float('nan'))):.6f} "
-                f"+/- {float(eval_summary.get('val_ssim_std', float('nan'))):.6f}"
+                f"  val_ssim: {_as_float(eval_summary.get('val_ssim_mean'), default=float('nan')):.6f} "
+                f"+/- {_as_float(eval_summary.get('val_ssim_std'), default=float('nan')):.6f}"
             )
         return
 
@@ -515,6 +638,8 @@ def main() -> None:
             classifier_learning_rate=args.classifier_learning_rate,
             classifier_weight_decay=args.classifier_weight_decay,
             classifier_seed=args.classifier_seed,
+            classifier_hidden_dims=classifier_hidden_dims,
+            classifier_dropout=args.classifier_dropout,
             save_figures=args.save_figure,
             figure_output_path=cfg.paths.figure_output_dir / args.figure_name,
             num_figure_images=args.num_figure_images,
@@ -524,21 +649,26 @@ def main() -> None:
             class_names=CIFAR10_CLASS_NAMES,
             save_loss_curves=args.save_loss_curve,
             loss_curve_output_path=cfg.paths.figure_output_dir / args.loss_curve_name,
+            loss_curve_update_every=args.loss_curve_update_every,
             noise_type=cfg.noise.noise_type,
             salt_pepper_amount=args.salt_pepper_amount,
             batch_noise_std_options=batch_noise_std_options,
             sample_noise_per_batch=args.sample_noise_per_batch,
             track_ssim=args.track_ssim,
+            train_metrics_max_samples=args.train_metrics_max_samples,
+            epoch_train_subset_min=args.epoch_train_subset_min,
+            epoch_train_subset_max=args.epoch_train_subset_max,
         )
 
         for result in fold_results:
+            fold_number = _as_int(result.get("fold"), default=0)
             logger.log_run(
                 make_log_row(
                     experiment_id=next_experiment_id,
                     result=result,
                     args=args,
                     mode="kfold",
-                    fold=int(result["fold"]),
+                    fold=fold_number,
                     logger=logger,
                     checkpoint_path=str(result.get("checkpoint_path", "")),
                     train_sample_count=sample_count,
@@ -600,6 +730,9 @@ def main() -> None:
         clean_val = clean_images[val_indices]
         train_split_labels = train_labels[train_indices]
         val_split_labels = train_labels[val_indices]
+        single_loss_curve_path = (
+            cfg.paths.figure_output_dir / args.loss_curve_name if args.save_loss_curve else None
+        )
 
         model = build_model()
         result = train_fold(
@@ -624,6 +757,11 @@ def main() -> None:
             batch_noise_std_options=batch_noise_std_options,
             sample_noise_per_batch=args.sample_noise_per_batch,
             track_ssim=args.track_ssim,
+            train_metrics_max_samples=args.train_metrics_max_samples,
+            epoch_train_subset_min=args.epoch_train_subset_min,
+            epoch_train_subset_max=args.epoch_train_subset_max,
+            loss_curve_output_path=single_loss_curve_path,
+            loss_curve_update_every=args.loss_curve_update_every,
         )
 
         classification_result: dict[str, object] = {}
@@ -642,6 +780,8 @@ def main() -> None:
                 weight_decay=args.classifier_weight_decay,
                 seed=args.classifier_seed,
                 denoise_batch_size=args.batch_size,
+                classifier_hidden_dims=classifier_hidden_dims,
+                classifier_dropout=args.classifier_dropout,
                 verbose=True,
             )
 
@@ -684,14 +824,9 @@ def main() -> None:
             )
             print(f"[INFO] Saved denoising preview figure to: {figure_path}")
 
-        if args.save_loss_curve:
-            loss_curve_path = cfg.paths.figure_output_dir / args.loss_curve_name
-            save_loss_curve(
-                history=[entry for entry in result.get("history", []) if isinstance(entry, dict)],
-                output_path=loss_curve_path,
-            )
-            result["loss_curve_path"] = str(loss_curve_path)
-            print(f"[INFO] Saved training loss curve to: {loss_curve_path}")
+        if single_loss_curve_path is not None:
+            result["loss_curve_path"] = str(single_loss_curve_path)
+            print(f"[INFO] Saved training loss curve to: {single_loss_curve_path}")
 
         logger.log_run(
             make_log_row(
@@ -710,27 +845,36 @@ def main() -> None:
         next_experiment_id += 1
 
         print("\nSingle Split Summary:")
-        print(f"  best_epoch: {int(result['best_epoch'])}")
-        print(f"  train_mse: {result['train_mse']:.6f}")
-        print(f"  val_mse: {result['val_mse']:.6f}")
+        print(f"  best_epoch: {_as_int(result.get('best_epoch'), default=0)}")
+        print(f"  train_mse: {_as_float(result.get('train_mse'), default=float('nan')):.6f}")
+        print(f"  val_mse: {_as_float(result.get('val_mse'), default=float('nan')):.6f}")
         if "test_mse" in result:
-            print(f"  test_mse: {result['test_mse']:.6f}")
-        print(f"  train_psnr: {result['train_psnr']:.6f}")
-        print(f"  val_psnr: {result['val_psnr']:.6f}")
+            print(f"  test_mse: {_as_float(result.get('test_mse'), default=float('nan')):.6f}")
+        print(f"  train_psnr: {_as_float(result.get('train_psnr'), default=float('nan')):.6f}")
+        print(f"  val_psnr: {_as_float(result.get('val_psnr'), default=float('nan')):.6f}")
         if "test_psnr" in result:
-            print(f"  test_psnr: {result['test_psnr']:.6f}")
+            print(f"  test_psnr: {_as_float(result.get('test_psnr'), default=float('nan')):.6f}")
         if args.track_ssim:
-            print(f"  train_ssim: {float(result.get('train_ssim', float('nan'))):.6f}")
-            print(f"  val_ssim: {float(result.get('val_ssim', float('nan'))):.6f}")
+            print(f"  train_ssim: {_as_float(result.get('train_ssim'), default=float('nan')):.6f}")
+            print(f"  val_ssim: {_as_float(result.get('val_ssim'), default=float('nan')):.6f}")
             if "test_ssim" in result:
-                print(f"  test_ssim: {float(result.get('test_ssim', float('nan'))):.6f}")
+                print(f"  test_ssim: {_as_float(result.get('test_ssim'), default=float('nan')):.6f}")
 
         if args.run_classification:
             print("\nClassification Summary:")
-            print(f"  train_accuracy: {result['classification_train_accuracy']:.4f}")
-            print(f"  val_accuracy: {result['classification_val_accuracy']:.4f}")
+            print(
+                f"  train_accuracy: "
+                f"{_as_float(result.get('classification_train_accuracy'), default=float('nan')):.4f}"
+            )
+            print(
+                f"  val_accuracy: "
+                f"{_as_float(result.get('classification_val_accuracy'), default=float('nan')):.4f}"
+            )
             if "classification_test_accuracy" in result:
-                print(f"  test_accuracy: {result['classification_test_accuracy']:.4f}")
+                print(
+                    f"  test_accuracy: "
+                    f"{_as_float(result.get('classification_test_accuracy'), default=float('nan')):.4f}"
+                )
 
 
 if __name__ == "__main__":

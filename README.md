@@ -168,18 +168,26 @@ Default behavior:
 - Verifies `torchvision` in `.venv` before training/evaluation
 - Uses optimized defaults for course-scale experiments:
 	- mode: `single` (one new experiment row)
-	- model: `conv` (NumPy convolutional DAE, 3->32->64 bottleneck->32->3)
-	- train/test subset: `10000/2500`
+	- model: `conv` (NumPy convolutional DAE, 3->32->96 bottleneck->32->3)
+	- train/test subset: `2000/500`
 	- image size: `32x32` (no downsampling)
 	- noise: gaussian with adjustable std
-	- per-batch gaussian noise scheduling (optional): `FULL_SAMPLE_NOISE_PER_BATCH=1` with `FULL_BATCH_NOISE_STD_OPTIONS=0.05,0.1`
-	- hybrid denoising loss (optional): `FULL_L1_WEIGHT=0.1` gives `MSE + 0.1 * MAE`
+	- denoising-focused defaults: `FULL_EPOCHS=80`, `FULL_BATCH_SIZE=32`, `FULL_LEARNING_RATE=0.001`, `FULL_WEIGHT_DECAY=0.0`, `FULL_LATENT_CHANNELS=96`, `FULL_CONV_SKIP_CONNECTION_WEIGHT=0.8`, `FULL_LR_DECAY=0.995`, `FULL_EARLY_STOPPING_PATIENCE=12`, `FULL_VAL_RATIO=0.1`
+	- dynamic train subset per epoch: `FULL_EPOCH_TRAIN_SUBSET_MIN=1800`, `FULL_EPOCH_TRAIN_SUBSET_MAX=1800` (full train split each epoch for the 2000/500 setup)
+	- per-batch gaussian noise scheduling is optional and disabled by default (`FULL_SAMPLE_NOISE_PER_BATCH=0`, `FULL_BATCH_NOISE_STD_OPTIONS=0.1`)
+	- hybrid denoising loss (optional): default `FULL_L1_WEIGHT=0.0` (pure MSE for PSNR-focused runs)
+	- automatic post-training skip calibration on validation set refines the effective skip weight to minimize validation MSE
+	- runtime speed-up: per-epoch train metrics are sampled with `FULL_TRAIN_METRICS_MAX_SAMPLES=1024` (set `0` for full-train metrics)
 	- SSIM tracking (optional): `FULL_TRACK_SSIM=1`
-- Keeps denoising as the primary objective while reporting classification accuracy by default (`FULL_RUN_CLASSIFICATION=1`)
+- Keeps denoising as the primary objective while reporting classification accuracy by default (`FULL_RUN_CLASSIFICATION=1`), using classifier MLP defaults `128,64,32` with dropout `0.4`
 - Saves checkpoint(s), denoising figure(s), loss curve(s), summary table(s), and prediction CSV(s)
 - Default checkpoint: `experiments/checkpoints/cdae_denoise_focus.npz`
 - Default denoising figure: `reports/figures/denoise_focus_preview.png`
 - Default loss curve: `reports/figures/denoise_focus_loss_curve.png`
+- Default denoising preview count: `10` images
+- Figure files are regenerated on each run, and the loss-curve image is refreshed during training epochs to show progress.
+- Removes stale run artifacts by default before each run (`FULL_CLEAN_OUTPUTS=1`).
+- Disable output generation with CLI flags when needed: `--no-save-figure` and/or `--no-save-loss-curve`
 - Default predictions CSV: `reports/tables/full_predictions.csv`
 - Default summary table: `reports/tables/denoise_focus_summary_latest.csv`
 - Logs new experiment rows to `experiments/logs/experiment_runs.csv`
@@ -202,14 +210,17 @@ FULL_MODE=kfold FULL_K_FOLDS=3 bash scripts/run_full_dataset.sh
 FULL_MODE=kfold_eval FULL_INIT_CHECKPOINT=experiments/checkpoints/cdae_denoise_focus.npz bash scripts/run_full_dataset.sh
 FULL_EPOCHS=5 bash scripts/run_full_dataset.sh
 FULL_MODEL_TYPE=conv bash scripts/run_full_dataset.sh
-FULL_MAX_SAMPLES=4000 FULL_MAX_TEST_SAMPLES=1000 bash scripts/run_full_dataset.sh
+FULL_MAX_SAMPLES=2000 FULL_MAX_TEST_SAMPLES=500 bash scripts/run_full_dataset.sh
 FULL_NOISE_STD=0.2 bash scripts/run_full_dataset.sh
 FULL_SAMPLE_NOISE_PER_BATCH=1 FULL_BATCH_NOISE_STD_OPTIONS=0.05,0.1 bash scripts/run_full_dataset.sh
-FULL_L1_WEIGHT=0.1 bash scripts/run_full_dataset.sh
+FULL_EPOCH_TRAIN_SUBSET_MIN=1800 FULL_EPOCH_TRAIN_SUBSET_MAX=1800 bash scripts/run_full_dataset.sh
+FULL_L1_WEIGHT=0.0 bash scripts/run_full_dataset.sh
+FULL_TRAIN_METRICS_MAX_SAMPLES=2048 bash scripts/run_full_dataset.sh
 FULL_TRACK_SSIM=1 bash scripts/run_full_dataset.sh
 FULL_CONV_SKIP_CONNECTION_WEIGHT=0.85 bash scripts/run_full_dataset.sh
+FULL_CLASSIFIER_HIDDEN_DIMS=128,64,32 FULL_CLASSIFIER_DROPOUT=0.4 bash scripts/run_full_dataset.sh
 FULL_RESIZE_TO=32 bash scripts/run_full_dataset.sh
-FULL_RUN_CLASSIFICATION=0 bash scripts/run_full_dataset.sh
+FULL_RUN_CLASSIFICATION=1 bash scripts/run_full_dataset.sh
 FULL_MODE=kfold_eval FULL_K_FOLDS=3 FULL_KFOLD_EVAL_OUTPUT=reports/tables/kfold_eval_summary_latest.csv bash scripts/run_full_dataset.sh
 FULL_NUM_PREDICTION_SAMPLES=10000 bash scripts/run_full_dataset.sh
 FULL_INIT_CHECKPOINT=experiments/checkpoints/cdae_denoise_focus.npz bash scripts/run_full_dataset.sh

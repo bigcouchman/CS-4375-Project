@@ -55,6 +55,8 @@ def run_softmax_classification_on_denoised(
     noisy_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
     denoise_batch_size: int = 64,
+    classifier_hidden_dims: tuple[int, ...] = (128, 64, 32),
+    classifier_dropout: float = 0.4,
     verbose: bool = False,
 ) -> dict[str, object]:
     y_train = np.asarray(y_train, dtype=np.int64)
@@ -82,9 +84,12 @@ def run_softmax_classification_on_denoised(
     if y_test is not None:
         y_test = np.asarray(y_test, dtype=np.int64)
         class_count = int(max(class_count - 1, int(np.max(y_test))) + 1)
+
     classifier = SoftmaxClassifier(
         input_dim=x_train.shape[1],
         num_classes=class_count,
+        hidden_dims=classifier_hidden_dims,
+        dropout_rate=classifier_dropout,
         seed=seed,
     )
 

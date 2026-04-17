@@ -13,10 +13,10 @@ class CDAE:
     def __init__(
         self,
         input_channels: int = 3,
-        latent_channels: int = 64,
+        latent_channels: int = 96,
         seed: int = 42,
         l1_weight: float = 0.0,
-        skip_connection_weight: float = 0.7,
+        skip_connection_weight: float = 0.8,
     ) -> None:
         self.input_channels = input_channels
         self.latent_channels = latent_channels
@@ -43,6 +43,16 @@ class CDAE:
         )
         self.bottleneck_act = ReLU()
 
+        self.bottleneck_refine_conv = Conv2D(
+            in_channels=latent_channels,
+            out_channels=latent_channels,
+            kernel_size=3,
+            padding=1,
+            stride=1,
+            seed=seed + 5,
+        )
+        self.bottleneck_refine_act = ReLU()
+
         self.decoder_upsample = NearestUpsample2D(scale=2)
 
         self.decoder_conv = Conv2D(
@@ -54,6 +64,26 @@ class CDAE:
             seed=seed + 2,
         )
         self.decoder_act = ReLU()
+
+        self.refine_conv = Conv2D(
+            in_channels=32,
+            out_channels=32,
+            kernel_size=3,
+            padding=1,
+            stride=1,
+            seed=seed + 4,
+        )
+        self.refine_act = ReLU()
+
+        self.refine_conv_2 = Conv2D(
+            in_channels=32,
+            out_channels=32,
+            kernel_size=3,
+            padding=1,
+            stride=1,
+            seed=seed + 6,
+        )
+        self.refine_act_2 = ReLU()
 
         self.output_conv = Conv2D(
             in_channels=32,
@@ -72,10 +102,19 @@ class CDAE:
         x = self.bottleneck_conv.forward(x)
         x = self.bottleneck_act.forward(x)
 
+        x = self.bottleneck_refine_conv.forward(x)
+        x = self.bottleneck_refine_act.forward(x)
+
         x = self.decoder_upsample.forward(x)
 
         x = self.decoder_conv.forward(x)
         x = self.decoder_act.forward(x)
+
+        x = self.refine_conv.forward(x)
+        x = self.refine_act.forward(x)
+
+        x = self.refine_conv_2.forward(x)
+        x = self.refine_act_2.forward(x)
 
         x = self.output_conv.forward(x)
         decoded = self.output_act.forward(x)
@@ -85,7 +124,7 @@ class CDAE:
                 (1.0 - self.skip_connection_weight) * decoded
                 + self.skip_connection_weight * noisy_images
             ).astype(np.float32)
-            return np.clip(reconstructed, 0.0, 1.0)
+            return reconstructed
 
         return decoded
 
@@ -134,10 +173,19 @@ class CDAE:
         grad = self.output_act.backward(grad)
         grad = self.output_conv.backward(grad)
 
+        grad = self.refine_act_2.backward(grad)
+        grad = self.refine_conv_2.backward(grad)
+
+        grad = self.refine_act.backward(grad)
+        grad = self.refine_conv.backward(grad)
+
         grad = self.decoder_act.backward(grad)
         grad = self.decoder_conv.backward(grad)
 
         grad = self.decoder_upsample.backward(grad)
+
+        grad = self.bottleneck_refine_act.backward(grad)
+        grad = self.bottleneck_refine_conv.backward(grad)
 
         grad = self.bottleneck_act.backward(grad)
         grad = self.bottleneck_conv.backward(grad)
@@ -147,7 +195,10 @@ class CDAE:
 
         self.encoder_conv.apply_gradients(learning_rate, weight_decay)
         self.bottleneck_conv.apply_gradients(learning_rate, weight_decay)
+        self.bottleneck_refine_conv.apply_gradients(learning_rate, weight_decay)
         self.decoder_conv.apply_gradients(learning_rate, weight_decay)
+        self.refine_conv.apply_gradients(learning_rate, weight_decay)
+        self.refine_conv_2.apply_gradients(learning_rate, weight_decay)
         self.output_conv.apply_gradients(learning_rate, weight_decay)
 
     def state_dict(self) -> dict[str, np.ndarray]:
@@ -160,8 +211,14 @@ class CDAE:
             "encoder_conv.bias": self.encoder_conv.bias.copy(),
             "bottleneck_conv.weights": self.bottleneck_conv.weights.copy(),
             "bottleneck_conv.bias": self.bottleneck_conv.bias.copy(),
+            "bottleneck_refine_conv.weights": self.bottleneck_refine_conv.weights.copy(),
+            "bottleneck_refine_conv.bias": self.bottleneck_refine_conv.bias.copy(),
             "decoder_conv.weights": self.decoder_conv.weights.copy(),
             "decoder_conv.bias": self.decoder_conv.bias.copy(),
+            "refine_conv.weights": self.refine_conv.weights.copy(),
+            "refine_conv.bias": self.refine_conv.bias.copy(),
+            "refine_conv_2.weights": self.refine_conv_2.weights.copy(),
+            "refine_conv_2.bias": self.refine_conv_2.bias.copy(),
             "output_conv.weights": self.output_conv.weights.copy(),
             "output_conv.bias": self.output_conv.bias.copy(),
         }
@@ -198,8 +255,28 @@ class CDAE:
         ).copy()
         self.bottleneck_conv.bias = np.asarray(state["bottleneck_conv.bias"], dtype=np.float32).copy()
 
+        if "bottleneck_refine_conv.weights" in state and "bottleneck_refine_conv.bias" in state:
+            self.bottleneck_refine_conv.weights = np.asarray(
+                state["bottleneck_refine_conv.weights"], dtype=np.float32
+            ).copy()
+            self.bottleneck_refine_conv.bias = np.asarray(
+                state["bottleneck_refine_conv.bias"], dtype=np.float32
+            ).copy()
+
         self.decoder_conv.weights = np.asarray(state["decoder_conv.weights"], dtype=np.float32).copy()
         self.decoder_conv.bias = np.asarray(state["decoder_conv.bias"], dtype=np.float32).copy()
+
+        if "refine_conv.weights" in state and "refine_conv.bias" in state:
+            self.refine_conv.weights = np.asarray(
+                state["refine_conv.weights"], dtype=np.float32
+            ).copy()
+            self.refine_conv.bias = np.asarray(state["refine_conv.bias"], dtype=np.float32).copy()
+
+        if "refine_conv_2.weights" in state and "refine_conv_2.bias" in state:
+            self.refine_conv_2.weights = np.asarray(
+                state["refine_conv_2.weights"], dtype=np.float32
+            ).copy()
+            self.refine_conv_2.bias = np.asarray(state["refine_conv_2.bias"], dtype=np.float32).copy()
 
         self.output_conv.weights = np.asarray(state["output_conv.weights"], dtype=np.float32).copy()
         self.output_conv.bias = np.asarray(state["output_conv.bias"], dtype=np.float32).copy()

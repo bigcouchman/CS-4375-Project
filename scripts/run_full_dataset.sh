@@ -35,28 +35,32 @@ PY
 
 FULL_MODE="${FULL_MODE:-single}"
 FULL_K_FOLDS="${FULL_K_FOLDS:-5}"
-FULL_EPOCHS="${FULL_EPOCHS:-30}"
-FULL_BATCH_SIZE="${FULL_BATCH_SIZE:-64}"
+FULL_EPOCHS="${FULL_EPOCHS:-80}"
+FULL_BATCH_SIZE="${FULL_BATCH_SIZE:-32}"
 FULL_LEARNING_RATE="${FULL_LEARNING_RATE:-0.001}"
-FULL_LR_DECAY="${FULL_LR_DECAY:-0.98}"
+FULL_LR_DECAY="${FULL_LR_DECAY:-0.995}"
 FULL_LR_DECAY_EVERY="${FULL_LR_DECAY_EVERY:-1}"
-FULL_WEIGHT_DECAY="${FULL_WEIGHT_DECAY:-0.00002}"
-FULL_EARLY_STOPPING_PATIENCE="${FULL_EARLY_STOPPING_PATIENCE:-4}"
-FULL_MIN_DELTA="${FULL_MIN_DELTA:-0.00001}"
-FULL_MAX_SAMPLES="${FULL_MAX_SAMPLES:-10000}"
-FULL_MAX_TEST_SAMPLES="${FULL_MAX_TEST_SAMPLES:-2500}"
+FULL_WEIGHT_DECAY="${FULL_WEIGHT_DECAY:-0.0}"
+FULL_EARLY_STOPPING_PATIENCE="${FULL_EARLY_STOPPING_PATIENCE:-12}"
+FULL_MIN_DELTA="${FULL_MIN_DELTA:-0.0}"
+FULL_MAX_SAMPLES="${FULL_MAX_SAMPLES:-96}"
+FULL_MAX_TEST_SAMPLES="${FULL_MAX_TEST_SAMPLES:-24}"
+FULL_VAL_RATIO="${FULL_VAL_RATIO:-0.1}"
 FULL_MODEL_TYPE="${FULL_MODEL_TYPE:-conv}"
-FULL_LATENT_CHANNELS="${FULL_LATENT_CHANNELS:-64}"
-FULL_CONV_SKIP_CONNECTION_WEIGHT="${FULL_CONV_SKIP_CONNECTION_WEIGHT:-0.7}"
+FULL_LATENT_CHANNELS="${FULL_LATENT_CHANNELS:-96}"
+FULL_CONV_SKIP_CONNECTION_WEIGHT="${FULL_CONV_SKIP_CONNECTION_WEIGHT:-0.8}"
 FULL_FC_HIDDEN_DIM="${FULL_FC_HIDDEN_DIM:-1024}"
 FULL_FC_BOTTLENECK_DIM="${FULL_FC_BOTTLENECK_DIM:-256}"
-FULL_L1_WEIGHT="${FULL_L1_WEIGHT:-0.1}"
+FULL_L1_WEIGHT="${FULL_L1_WEIGHT:-0.0}"
 FULL_RESIZE_TO="${FULL_RESIZE_TO:-32}"
 FULL_RANDOM_SUBSET="${FULL_RANDOM_SUBSET:-1}"
 FULL_NOISE_TYPE="${FULL_NOISE_TYPE:-gaussian}"
 FULL_NOISE_STD="${FULL_NOISE_STD:-0.1}"
-FULL_SAMPLE_NOISE_PER_BATCH="${FULL_SAMPLE_NOISE_PER_BATCH:-1}"
-FULL_BATCH_NOISE_STD_OPTIONS="${FULL_BATCH_NOISE_STD_OPTIONS:-0.05,0.1}"
+FULL_SAMPLE_NOISE_PER_BATCH="${FULL_SAMPLE_NOISE_PER_BATCH:-0}"
+FULL_BATCH_NOISE_STD_OPTIONS="${FULL_BATCH_NOISE_STD_OPTIONS:-0.1}"
+FULL_TRAIN_METRICS_MAX_SAMPLES="${FULL_TRAIN_METRICS_MAX_SAMPLES:-1024}"
+FULL_EPOCH_TRAIN_SUBSET_MIN="${FULL_EPOCH_TRAIN_SUBSET_MIN:-1800}"
+FULL_EPOCH_TRAIN_SUBSET_MAX="${FULL_EPOCH_TRAIN_SUBSET_MAX:-1800}"
 FULL_TRACK_SSIM="${FULL_TRACK_SSIM:-0}"
 FULL_INIT_CHECKPOINT="${FULL_INIT_CHECKPOINT:-}"
 FULL_CHECKPOINT_PREFIX="${FULL_CHECKPOINT_PREFIX:-experiments/checkpoints/cdae_denoise_focus}"
@@ -65,15 +69,19 @@ FULL_CLASSIFIER_EPOCHS="${FULL_CLASSIFIER_EPOCHS:-30}"
 FULL_CLASSIFIER_BATCH_SIZE="${FULL_CLASSIFIER_BATCH_SIZE:-64}"
 FULL_CLASSIFIER_LR="${FULL_CLASSIFIER_LR:-0.02}"
 FULL_CLASSIFIER_WEIGHT_DECAY="${FULL_CLASSIFIER_WEIGHT_DECAY:-0.0001}"
+FULL_CLASSIFIER_HIDDEN_DIMS="${FULL_CLASSIFIER_HIDDEN_DIMS:-128,64,32}"
+FULL_CLASSIFIER_DROPOUT="${FULL_CLASSIFIER_DROPOUT:-0.4}"
 FULL_FIGURE_NAME="${FULL_FIGURE_NAME:-denoise_focus_preview.png}"
 FULL_SAVE_LOSS_CURVE="${FULL_SAVE_LOSS_CURVE:-1}"
 FULL_LOSS_CURVE_NAME="${FULL_LOSS_CURVE_NAME:-denoise_focus_loss_curve.png}"
+FULL_LOSS_CURVE_UPDATE_EVERY="${FULL_LOSS_CURVE_UPDATE_EVERY:-1}"
 FULL_KFOLD_EVAL_OUTPUT="${FULL_KFOLD_EVAL_OUTPUT:-reports/tables/kfold_eval_summary_latest.csv}"
-FULL_NUM_FIGURE_IMAGES="${FULL_NUM_FIGURE_IMAGES:-8}"
+FULL_NUM_FIGURE_IMAGES="${FULL_NUM_FIGURE_IMAGES:-10}"
 FULL_PREDICTIONS_OUTPUT="${FULL_PREDICTIONS_OUTPUT:-reports/tables/full_predictions.csv}"
 FULL_NUM_PREDICTION_SAMPLES="${FULL_NUM_PREDICTION_SAMPLES:-$FULL_MAX_TEST_SAMPLES}"
 FULL_SUMMARY_OUTPUT="${FULL_SUMMARY_OUTPUT:-reports/tables/denoise_focus_summary_latest.csv}"
 FULL_APPEND_FINAL_RESULTS="${FULL_APPEND_FINAL_RESULTS:-1}"
+FULL_CLEAN_OUTPUTS="${FULL_CLEAN_OUTPUTS:-1}"
 
 if [[ "$FULL_MODE" != "single" && "$FULL_MODE" != "kfold" && "$FULL_MODE" != "kfold_eval" ]]; then
     echo "FULL_MODE must be one of: single, kfold, kfold_eval."
@@ -87,6 +95,48 @@ if [[ "$FULL_MODE" == "kfold_eval" ]]; then
     fi
     FULL_RUN_CLASSIFICATION="0"
     FULL_SAVE_LOSS_CURVE="0"
+fi
+
+remove_artifact_pattern() {
+    local pattern="$1"
+    local artifact
+
+    while IFS= read -r artifact; do
+        if [[ "$(basename "$artifact")" == ".gitkeep" ]]; then
+            continue
+        fi
+        rm -f "$artifact"
+    done < <(compgen -G "$pattern" || true)
+}
+
+if [[ "$FULL_CLEAN_OUTPUTS" -eq 1 ]]; then
+    figure_stem="${FULL_FIGURE_NAME%.*}"
+    figure_ext="${FULL_FIGURE_NAME##*.}"
+    if [[ "$figure_stem" == "$FULL_FIGURE_NAME" ]]; then
+        figure_ext="png"
+    fi
+
+    loss_stem="${FULL_LOSS_CURVE_NAME%.*}"
+    loss_ext="${FULL_LOSS_CURVE_NAME##*.}"
+    if [[ "$loss_stem" == "$FULL_LOSS_CURVE_NAME" ]]; then
+        loss_ext="png"
+    fi
+
+    pred_stem="${FULL_PREDICTIONS_OUTPUT%.*}"
+    pred_ext="${FULL_PREDICTIONS_OUTPUT##*.}"
+    if [[ "$pred_stem" == "$FULL_PREDICTIONS_OUTPUT" ]]; then
+        pred_ext="csv"
+    fi
+
+    remove_artifact_pattern "reports/figures/$FULL_FIGURE_NAME"
+    remove_artifact_pattern "reports/figures/${figure_stem}_fold*.${figure_ext}"
+    remove_artifact_pattern "reports/figures/$FULL_LOSS_CURVE_NAME"
+    remove_artifact_pattern "reports/figures/${loss_stem}_fold*.${loss_ext}"
+
+    remove_artifact_pattern "$FULL_SUMMARY_OUTPUT"
+    remove_artifact_pattern "$FULL_PREDICTIONS_OUTPUT"
+    remove_artifact_pattern "${pred_stem}_fold*.${pred_ext}"
+    remove_artifact_pattern "$FULL_KFOLD_EVAL_OUTPUT"
 fi
 
 START_EXPERIMENT_ID="$(( $("$PYTHON_BIN" - <<'PY'
@@ -120,10 +170,14 @@ args=(
   --weight-decay "$FULL_WEIGHT_DECAY"
   --early-stopping-patience "$FULL_EARLY_STOPPING_PATIENCE"
   --min-delta "$FULL_MIN_DELTA"
+    --val-ratio "$FULL_VAL_RATIO"
   --noise-type "$FULL_NOISE_TYPE"
   --noise-std "$FULL_NOISE_STD"
     --l1-weight "$FULL_L1_WEIGHT"
     --batch-noise-std-options "$FULL_BATCH_NOISE_STD_OPTIONS"
+    --train-metrics-max-samples "$FULL_TRAIN_METRICS_MAX_SAMPLES"
+        --epoch-train-subset-min "$FULL_EPOCH_TRAIN_SUBSET_MIN"
+        --epoch-train-subset-max "$FULL_EPOCH_TRAIN_SUBSET_MAX"
   --max-samples "$FULL_MAX_SAMPLES"
   --max-test-samples "$FULL_MAX_TEST_SAMPLES"
     --model-type "$FULL_MODEL_TYPE"
@@ -131,6 +185,7 @@ args=(
   --save-checkpoint "${FULL_CHECKPOINT_PREFIX}.npz"
   --save-figure
   --figure-name "$FULL_FIGURE_NAME"
+    --loss-curve-update-every "$FULL_LOSS_CURVE_UPDATE_EVERY"
   --num-figure-images "$FULL_NUM_FIGURE_IMAGES"
 )
 
@@ -189,6 +244,8 @@ if [[ "$FULL_RUN_CLASSIFICATION" -eq 1 ]]; then
     --classifier-batch-size "$FULL_CLASSIFIER_BATCH_SIZE"
     --classifier-learning-rate "$FULL_CLASSIFIER_LR"
     --classifier-weight-decay "$FULL_CLASSIFIER_WEIGHT_DECAY"
+    --classifier-hidden-dims "$FULL_CLASSIFIER_HIDDEN_DIMS"
+    --classifier-dropout "$FULL_CLASSIFIER_DROPOUT"
     --save-predictions
     --predictions-output "$FULL_PREDICTIONS_OUTPUT"
     --num-prediction-samples "$FULL_NUM_PREDICTION_SAMPLES"

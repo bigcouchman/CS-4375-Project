@@ -9,9 +9,35 @@ from sklearn.model_selection import KFold
 
 from src.classification import run_softmax_classification_on_denoised
 from src.data import add_gaussian_noise, add_salt_pepper_noise
-from src.evaluation.visualize import save_denoising_grid, save_loss_curve
+from src.evaluation.visualize import save_denoising_grid
 
 from .trainer import compute_metrics, train_fold
+
+
+def _as_float(value: object, default: float = float("nan")) -> float:
+    if isinstance(value, (float, int, np.floating, np.integer)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value):
+            return int(value)
+        return default
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return default
+    return default
 
 
 def _fold_output_path(base_path: str | Path, fold_number: int, default_suffix: str) -> Path:
@@ -303,6 +329,8 @@ def run_kfold_experiment(
     classifier_learning_rate: float = 0.1,
     classifier_weight_decay: float = 0.0,
     classifier_seed: int = 123,
+    classifier_hidden_dims: tuple[int, ...] = (128, 64, 32),
+    classifier_dropout: float = 0.4,
     save_figures: bool = False,
     figure_output_path: str | Path | None = None,
     num_figure_images: int = 8,
@@ -312,11 +340,15 @@ def run_kfold_experiment(
     class_names: list[str] | None = None,
     save_loss_curves: bool = False,
     loss_curve_output_path: str | Path | None = None,
+    loss_curve_update_every: int = 1,
     noise_type: str = "gaussian",
     salt_pepper_amount: float = 0.01,
     batch_noise_std_options: tuple[float, ...] | None = None,
     sample_noise_per_batch: bool = False,
     track_ssim: bool = False,
+    train_metrics_max_samples: int = 1024,
+    epoch_train_subset_min: int = 0,
+    epoch_train_subset_max: int = 0,
 ) -> list[dict[str, object]]:
     if clean_images.shape != noisy_images.shape:
         raise ValueError("Clean and noisy arrays must have matching shapes.")
@@ -336,6 +368,13 @@ def run_kfold_experiment(
         noisy_val = noisy_images[val_idx]
 
         model = model_builder()
+        fold_loss_curve_path: Path | None = None
+        if save_loss_curves and loss_curve_output_path is not None:
+            fold_loss_curve_path = _fold_output_path(
+                loss_curve_output_path,
+                fold_number=fold_number,
+                default_suffix=".png",
+            )
 
         fold_result = train_fold(
             model=model,
@@ -359,6 +398,11 @@ def run_kfold_experiment(
             batch_noise_std_options=batch_noise_std_options,
             sample_noise_per_batch=sample_noise_per_batch,
             track_ssim=track_ssim,
+            train_metrics_max_samples=train_metrics_max_samples,
+            epoch_train_subset_min=epoch_train_subset_min,
+            epoch_train_subset_max=epoch_train_subset_max,
+            loss_curve_output_path=fold_loss_curve_path,
+            loss_curve_update_every=loss_curve_update_every,
         )
 
         if run_classification and train_labels is not None:
@@ -379,19 +423,23 @@ def run_kfold_experiment(
                 noisy_test=noisy_test,
                 y_test=test_labels,
                 denoise_batch_size=batch_size,
+                classifier_hidden_dims=classifier_hidden_dims,
+                classifier_dropout=classifier_dropout,
             )
 
-            fold_result["classification_train_accuracy"] = float(
-                classification_result["classification_train_accuracy"]
+            fold_result["classification_train_accuracy"] = _as_float(
+                classification_result.get("classification_train_accuracy")
             )
-            fold_result["classification_val_accuracy"] = float(
-                classification_result["classification_val_accuracy"]
+            fold_result["classification_val_accuracy"] = _as_float(
+                classification_result.get("classification_val_accuracy")
             )
-            fold_result["classifier_final_loss"] = float(classification_result["classifier_final_loss"])
+            fold_result["classifier_final_loss"] = _as_float(
+                classification_result.get("classifier_final_loss")
+            )
 
             if "classification_test_accuracy" in classification_result:
-                fold_result["classification_test_accuracy"] = float(
-                    classification_result["classification_test_accuracy"]
+                fold_result["classification_test_accuracy"] = _as_float(
+                    classification_result.get("classification_test_accuracy")
                 )
 
             if (
@@ -432,17 +480,8 @@ def run_kfold_experiment(
                 )
                 fold_result["figure_path"] = str(figure_path)
 
-        if save_loss_curves and loss_curve_output_path is not None:
-            loss_curve_path = _fold_output_path(
-                loss_curve_output_path,
-                fold_number=fold_number,
-                default_suffix=".png",
-            )
-            save_loss_curve(
-                history=[entry for entry in fold_result.get("history", []) if isinstance(entry, dict)],
-                output_path=loss_curve_path,
-            )
-            fold_result["loss_curve_path"] = str(loss_curve_path)
+        if fold_loss_curve_path is not None:
+            fold_result["loss_curve_path"] = str(fold_loss_curve_path)
 
         if checkpoint_prefix:
             checkpoint_path = Path(f"{checkpoint_prefix}_fold{fold_number}.npz")
@@ -451,7 +490,7 @@ def run_kfold_experiment(
                 model.save_checkpoint(checkpoint_path)
                 fold_result["checkpoint_path"] = str(checkpoint_path)
 
-        val_mse = float(fold_result.get("val_mse", np.inf))
+        val_mse = _as_float(fold_result.get("val_mse", np.inf), default=float("inf"))
         if val_mse < best_val_mse:
             best_val_mse = val_mse
             best_fold = fold_number
@@ -462,7 +501,7 @@ def run_kfold_experiment(
 
     for fold_result in fold_results:
         fold_result["best_fold"] = best_fold
-        fold_result["is_best_fold"] = int(int(fold_result["fold"]) == best_fold)
+        fold_result["is_best_fold"] = int(_as_int(fold_result.get("fold"), default=-1) == best_fold)
 
     if checkpoint_prefix and best_checkpoint_path:
         target_best_path = Path(f"{checkpoint_prefix}_best.npz")

@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional L1 term weight in reconstruction loss: loss = MSE + l1_weight * MAE",
     )
     parser.add_argument("--noise-type", choices=["gaussian", "salt_pepper"], default="gaussian")
-    parser.add_argument("--noise-std", type=float, default=0.1)
+    parser.add_argument("--noise-std", type=float, default=0.05)
     parser.add_argument(
         "--sample-noise-per-batch",
         action=argparse.BooleanOptionalAction,
@@ -128,13 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-noise-std-options",
         type=str,
-        default="0.05,0.1",
+        default="0.04,0.05,0.06",
         help="Comma-separated std values used when --sample-noise-per-batch is enabled.",
     )
     parser.add_argument("--salt-pepper-amount", type=float, default=0.01)
     parser.add_argument("--max-samples", type=int, default=2000)
     parser.add_argument("--max-test-samples", type=int, default=500)
-    parser.add_argument("--resize-to", type=int, default=16)
+    parser.add_argument("--resize-to", type=int, default=32)
     parser.add_argument(
         "--random-subset",
         action=argparse.BooleanOptionalAction,
@@ -198,20 +198,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num-figure-images", type=int, default=10)
     parser.add_argument("--run-classification", action="store_true")
-    parser.add_argument("--classifier-epochs", type=int, default=20)
-    parser.add_argument("--classifier-batch-size", type=int, default=64)
-    parser.add_argument("--classifier-learning-rate", type=float, default=0.1)
-    parser.add_argument("--classifier-weight-decay", type=float, default=1e-4)
+    parser.add_argument("--classifier-epochs", type=int, default=40)
+    parser.add_argument("--classifier-batch-size", type=int, default=32)
+    parser.add_argument("--classifier-learning-rate", type=float, default=0.02)
+    parser.add_argument("--classifier-weight-decay", type=float, default=5e-4)
     parser.add_argument(
         "--classifier-hidden-dims",
         type=str,
-        default="128,64,32",
+        default="64,32",
         help="Comma-separated hidden layer sizes for classifier MLP; empty string disables hidden layers.",
     )
     parser.add_argument(
         "--classifier-dropout",
         type=float,
-        default=0.4,
+        default=0.5,
         help="Dropout rate for hidden layers in classifier MLP.",
     )
     parser.add_argument("--classifier-seed", type=int, default=123)
@@ -392,6 +392,8 @@ def make_log_row(
         "batch_noise_std_options": args.batch_noise_std_options,
         "epoch_train_subset_min": args.epoch_train_subset_min,
         "epoch_train_subset_max": args.epoch_train_subset_max,
+        "skip_weight_calibration_applied": result.get("skip_weight_calibration_applied", ""),
+        "calibrated_skip_weight": result.get("calibrated_skip_weight", ""),
         "resume_checkpoint": args.resume_checkpoint,
         "checkpoint_path": checkpoint_path,
         "run_classification": int(args.run_classification),
@@ -717,12 +719,25 @@ def main() -> None:
 
     else:
         indices = np.arange(clean_images.shape[0])
-        train_indices, val_indices = train_test_split(
-            indices,
-            test_size=args.val_ratio,
-            random_state=cfg.train.random_seed,
-            shuffle=True,
-        )
+        stratify_labels = train_labels if 0.0 < args.val_ratio < 1.0 else None
+        try:
+            train_indices, val_indices = train_test_split(
+                indices,
+                test_size=args.val_ratio,
+                random_state=cfg.train.random_seed,
+                shuffle=True,
+                stratify=stratify_labels,
+            )
+        except ValueError:
+            print(
+                "[WARN] Falling back to non-stratified train/val split due to limited per-class samples."
+            )
+            train_indices, val_indices = train_test_split(
+                indices,
+                test_size=args.val_ratio,
+                random_state=cfg.train.random_seed,
+                shuffle=True,
+            )
 
         noisy_train = noisy_images[train_indices]
         noisy_val = noisy_images[val_indices]
@@ -772,6 +787,7 @@ def main() -> None:
                 y_train=train_split_labels,
                 noisy_val=noisy_val,
                 y_val=val_split_labels,
+                clean_train=clean_train,
                 noisy_test=noisy_test_images,
                 y_test=test_labels,
                 epochs=args.classifier_epochs,

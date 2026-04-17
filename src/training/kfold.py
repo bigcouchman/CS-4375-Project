@@ -415,6 +415,7 @@ def run_kfold_experiment(
                 y_train=y_train,
                 noisy_val=noisy_val,
                 y_val=y_val,
+                clean_train=clean_train,
                 epochs=classifier_epochs,
                 batch_size=classifier_batch_size,
                 learning_rate=classifier_learning_rate,

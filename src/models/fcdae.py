@@ -66,7 +66,10 @@ class FullyConnectedDAE:
         clipped = np.clip(x, -30.0, 30.0)
         return 1.0 / (1.0 + np.exp(-clipped))
 
-    def forward(self, noisy_images: np.ndarray) -> np.ndarray:
+    def _encode(
+        self,
+        noisy_images: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if noisy_images.ndim != 4:
             raise ValueError("Expected noisy_images shape (N, H, W, C).")
 
@@ -78,6 +81,16 @@ class FullyConnectedDAE:
 
         z2 = a1 @ self.w2 + self.b2
         a2 = self._relu(z2)
+
+        return flattened, z1, a1, z2, a2
+
+    def encode_features(self, noisy_images: np.ndarray) -> np.ndarray:
+        """Return bottleneck encoder activations for classifier features."""
+        _, _, _, _, a2 = self._encode(noisy_images)
+        return a2.astype(np.float32)
+
+    def forward(self, noisy_images: np.ndarray) -> np.ndarray:
+        flattened, z1, a1, z2, a2 = self._encode(noisy_images)
 
         z3 = a2 @ self.w3 + self.b3
         a3 = self._relu(z3)

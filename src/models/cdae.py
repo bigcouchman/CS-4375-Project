@@ -95,8 +95,9 @@ class CDAE:
         )
         self.output_act = Sigmoid()
 
-    def forward(self, noisy_images: np.ndarray) -> np.ndarray:
-        x = self.encoder_conv.forward(noisy_images)
+    def encode_features(self, images: np.ndarray) -> np.ndarray:
+        """Return latent encoder representation before the decoder path."""
+        x = self.encoder_conv.forward(images)
         x = self.encoder_act.forward(x)
 
         x = self.bottleneck_conv.forward(x)
@@ -104,6 +105,10 @@ class CDAE:
 
         x = self.bottleneck_refine_conv.forward(x)
         x = self.bottleneck_refine_act.forward(x)
+        return x.astype(np.float32)
+
+    def forward(self, noisy_images: np.ndarray) -> np.ndarray:
+        x = self.encode_features(noisy_images)
 
         x = self.decoder_upsample.forward(x)
 

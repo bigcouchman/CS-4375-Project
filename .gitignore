@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Large datasets and generated artifacts
+/data/cifar-10-batches-py/
+/data/cifar-10-python.tar.gz
+
+# Experiment outputs
+/experiments/logs/*.csv
+!/experiments/logs/experiment_log_template.csv
+!/experiments/logs/experiment_runs.csv
+/experiments/checkpoints/*.npz
+!/experiments/checkpoints/.gitkeep
+# Keep generated figures tracked.
+!/reports/figures/.gitkeep
+/reports/tables/*
+!/reports/tables/.gitkeep
+!/reports/tables/denoise_focus_summary_latest.csv
+!/reports/tables/final_results.csv
+!/reports/tables/kfold_eval_summary_latest.csv
+!/reports/tables/full_predictions.csv
+
+# Local environment files
+.env
+.env.*

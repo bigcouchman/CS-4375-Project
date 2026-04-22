@@ -77,27 +77,31 @@ def run_softmax_classification_on_denoised(
     noisy_test: np.ndarray | None = None,
     y_test: np.ndarray | None = None,
     denoise_batch_size: int = 64,
-    classifier_hidden_dims: tuple[int, ...] = (128, 64, 32),
-    classifier_dropout: float = 0.4,
+    classifier_hidden_dims: tuple[int, ...] = (32,),
+    classifier_dropout: float = 0.6,
+    classifier_feature_noise_std: float = 0.01,
+    classifier_early_stopping_patience: int = 6,
+    classifier_early_stopping_min_delta: float = 0.001,
     verbose: bool = False,
 ) -> dict[str, object]:
     y_train = np.asarray(y_train, dtype=np.int64)
     y_val = np.asarray(y_val, dtype=np.int64)
 
-    x_train_denoised = _encode_and_flatten_in_batches(
+    # Use encoder features directly from noisy inputs for the classifier.
+    x_train_noisy = _encode_and_flatten_in_batches(
         denoiser_model,
         noisy_train,
         batch_size=denoise_batch_size,
-        denoise_first=True,
+        denoise_first=False,
     )
     x_val = _encode_and_flatten_in_batches(
         denoiser_model,
         noisy_val,
         batch_size=denoise_batch_size,
-        denoise_first=True,
+        denoise_first=False,
     )
 
-    x_train_fit = x_train_denoised
+    x_train_fit = x_train_noisy
     y_train_fit = y_train
     if clean_train is not None:
         x_train_clean = _encode_and_flatten_in_batches(
@@ -106,7 +110,7 @@ def run_softmax_classification_on_denoised(
             batch_size=denoise_batch_size,
             denoise_first=False,
         )
-        x_train_fit = np.concatenate((x_train_denoised, x_train_clean), axis=0)
+        x_train_fit = np.concatenate((x_train_noisy, x_train_clean), axis=0)
         y_train_fit = np.concatenate((y_train, y_train), axis=0)
 
     train_mean = np.mean(x_train_fit, axis=0, keepdims=True)
@@ -114,8 +118,11 @@ def run_softmax_classification_on_denoised(
     train_std = np.where(train_std < 1e-6, 1.0, train_std)
 
     x_train_fit = _apply_standardization(x_train_fit, train_mean, train_std)
-    x_train_denoised = _apply_standardization(x_train_denoised, train_mean, train_std)
+    x_train_noisy = _apply_standardization(x_train_noisy, train_mean, train_std)
     x_val = _apply_standardization(x_val, train_mean, train_std)
+
+    if classifier_feature_noise_std < 0.0:
+        raise ValueError("classifier_feature_noise_std must be >= 0.0.")
 
     class_count = int(max(np.max(y_train), np.max(y_val)) + 1)
     if y_test is not None:
@@ -127,6 +134,7 @@ def run_softmax_classification_on_denoised(
         num_classes=class_count,
         hidden_dims=classifier_hidden_dims,
         dropout_rate=classifier_dropout,
+        input_noise_std=classifier_feature_noise_std,
         seed=seed,
     )
 
@@ -138,13 +146,17 @@ def run_softmax_classification_on_denoised(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         seed=seed,
+        val_features=x_val,
+        val_labels=y_val,
+        early_stopping_patience=classifier_early_stopping_patience,
+        early_stopping_min_delta=classifier_early_stopping_min_delta,
         verbose=verbose,
     )
 
     result: dict[str, object] = {
         "classifier_epochs_completed": len(history),
         "classifier_final_loss": history[-1]["loss"] if history else float("nan"),
-        "classification_train_accuracy": classifier.score(x_train_denoised, y_train),
+        "classification_train_accuracy": classifier.score(x_train_noisy, y_train),
         "classification_val_accuracy": classifier.score(x_val, y_val),
     }
 
@@ -153,7 +165,7 @@ def run_softmax_classification_on_denoised(
             denoiser_model,
             noisy_test,
             batch_size=denoise_batch_size,
-            denoise_first=True,
+            denoise_first=False,
         )
         x_test = _apply_standardization(x_test, train_mean, train_std)
         result["classification_test_accuracy"] = classifier.score(x_test, y_test)

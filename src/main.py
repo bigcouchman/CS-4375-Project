@@ -198,21 +198,39 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num-figure-images", type=int, default=10)
     parser.add_argument("--run-classification", action="store_true")
-    parser.add_argument("--classifier-epochs", type=int, default=40)
+    parser.add_argument("--classifier-epochs", type=int, default=25)
     parser.add_argument("--classifier-batch-size", type=int, default=32)
-    parser.add_argument("--classifier-learning-rate", type=float, default=0.02)
-    parser.add_argument("--classifier-weight-decay", type=float, default=5e-4)
+    parser.add_argument("--classifier-learning-rate", type=float, default=0.005)
+    parser.add_argument("--classifier-weight-decay", type=float, default=0.003)
     parser.add_argument(
         "--classifier-hidden-dims",
         type=str,
-        default="64,32",
+        default="32",
         help="Comma-separated hidden layer sizes for classifier MLP; empty string disables hidden layers.",
     )
     parser.add_argument(
         "--classifier-dropout",
         type=float,
-        default=0.5,
+        default=0.6,
         help="Dropout rate for hidden layers in classifier MLP.",
+    )
+    parser.add_argument(
+        "--classifier-feature-noise-std",
+        type=float,
+        default=0.01,
+        help="Std-dev of Gaussian noise added to standardized classifier training features.",
+    )
+    parser.add_argument(
+        "--classifier-early-stopping-patience",
+        type=int,
+        default=6,
+        help="Stop classifier training after this many epochs without val accuracy improvement.",
+    )
+    parser.add_argument(
+        "--classifier-early-stopping-min-delta",
+        type=float,
+        default=0.001,
+        help="Minimum validation-accuracy improvement required to reset classifier early stopping.",
     )
     parser.add_argument("--classifier-seed", type=int, default=123)
     parser.add_argument("--save-predictions", action="store_true")
@@ -642,6 +660,9 @@ def main() -> None:
             classifier_seed=args.classifier_seed,
             classifier_hidden_dims=classifier_hidden_dims,
             classifier_dropout=args.classifier_dropout,
+            classifier_feature_noise_std=args.classifier_feature_noise_std,
+            classifier_early_stopping_patience=args.classifier_early_stopping_patience,
+            classifier_early_stopping_min_delta=args.classifier_early_stopping_min_delta,
             save_figures=args.save_figure,
             figure_output_path=cfg.paths.figure_output_dir / args.figure_name,
             num_figure_images=args.num_figure_images,
@@ -798,6 +819,9 @@ def main() -> None:
                 denoise_batch_size=args.batch_size,
                 classifier_hidden_dims=classifier_hidden_dims,
                 classifier_dropout=args.classifier_dropout,
+                classifier_feature_noise_std=args.classifier_feature_noise_std,
+                classifier_early_stopping_patience=args.classifier_early_stopping_patience,
+                classifier_early_stopping_min_delta=args.classifier_early_stopping_min_delta,
                 verbose=True,
             )
 

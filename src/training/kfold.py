@@ -329,8 +329,11 @@ def run_kfold_experiment(
     classifier_learning_rate: float = 0.1,
     classifier_weight_decay: float = 0.0,
     classifier_seed: int = 123,
-    classifier_hidden_dims: tuple[int, ...] = (128, 64, 32),
-    classifier_dropout: float = 0.4,
+    classifier_hidden_dims: tuple[int, ...] = (32,),
+    classifier_dropout: float = 0.6,
+    classifier_feature_noise_std: float = 0.01,
+    classifier_early_stopping_patience: int = 6,
+    classifier_early_stopping_min_delta: float = 0.001,
     save_figures: bool = False,
     figure_output_path: str | Path | None = None,
     num_figure_images: int = 8,
@@ -426,6 +429,9 @@ def run_kfold_experiment(
                 denoise_batch_size=batch_size,
                 classifier_hidden_dims=classifier_hidden_dims,
                 classifier_dropout=classifier_dropout,
+                classifier_feature_noise_std=classifier_feature_noise_std,
+                classifier_early_stopping_patience=classifier_early_stopping_patience,
+                classifier_early_stopping_min_delta=classifier_early_stopping_min_delta,
             )
 
             fold_result["classification_train_accuracy"] = _as_float(

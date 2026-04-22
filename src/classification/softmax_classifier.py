@@ -17,6 +17,7 @@ class SoftmaxClassifier:
         num_classes: int,
         hidden_dims: Sequence[int] | None = None,
         dropout_rate: float = 0.0,
+        input_noise_std: float = 0.0,
         seed: int = 42,
     ) -> None:
         if input_dim <= 0:
@@ -30,8 +31,11 @@ class SoftmaxClassifier:
 
         if dropout_rate < 0.0 or dropout_rate >= 1.0:
             raise ValueError("dropout_rate must satisfy 0.0 <= dropout_rate < 1.0.")
+        if input_noise_std < 0.0:
+            raise ValueError("input_noise_std must be >= 0.0.")
 
         self.dropout_rate = float(dropout_rate)
+        self.input_noise_std = float(input_noise_std)
         self.hidden_dims = parsed_hidden_dims
 
         layer_dims = (int(input_dim), *parsed_hidden_dims, int(num_classes))
@@ -179,6 +183,10 @@ class SoftmaxClassifier:
         learning_rate: float,
         weight_decay: float = 0.0,
         seed: int = 42,
+        val_features: np.ndarray | None = None,
+        val_labels: np.ndarray | None = None,
+        early_stopping_patience: int = 0,
+        early_stopping_min_delta: float = 0.0,
         verbose: bool = False,
     ) -> list[dict[str, float]]:
         if features.ndim != 2:
@@ -189,6 +197,33 @@ class SoftmaxClassifier:
             raise ValueError("features and labels must have same number of samples.")
         if batch_size <= 0:
             raise ValueError("batch_size must be > 0.")
+        if early_stopping_patience < 0:
+            raise ValueError("early_stopping_patience must be >= 0.")
+        if early_stopping_min_delta < 0.0:
+            raise ValueError("early_stopping_min_delta must be >= 0.0.")
+
+        use_validation = val_features is not None and val_labels is not None
+        validated_val_features: np.ndarray | None = None
+        validated_val_labels: np.ndarray | None = None
+        if use_validation:
+            validated_val_features = np.asarray(val_features, dtype=np.float32)
+            validated_val_labels = np.asarray(val_labels, dtype=np.int64)
+            if validated_val_features.ndim != 2:
+                raise ValueError("val_features must have shape (N, D).")
+            if validated_val_labels.ndim != 1:
+                raise ValueError("val_labels must have shape (N,).")
+            if validated_val_features.shape[0] != validated_val_labels.shape[0]:
+                raise ValueError("val_features and val_labels must have same number of samples.")
+            if validated_val_features.shape[1] != features.shape[1]:
+                raise ValueError("val_features must have same feature dimension as features.")
+
+        has_validation = (
+            validated_val_features is not None and validated_val_labels is not None
+        )
+
+        best_val_accuracy = float("-inf")
+        epochs_without_improvement = 0
+        best_state: tuple[list[np.ndarray], list[np.ndarray]] | None = None
 
         history: list[dict[str, float]] = []
 
@@ -202,8 +237,17 @@ class SoftmaxClassifier:
                 batch_size=batch_size,
                 seed=seed + epoch,
             ):
+                train_batch = x_batch
+                if self.input_noise_std > 0.0:
+                    feature_noise = dropout_rng.normal(
+                        loc=0.0,
+                        scale=self.input_noise_std,
+                        size=x_batch.shape,
+                    ).astype(np.float32)
+                    train_batch = (x_batch + feature_noise).astype(np.float32)
+
                 loss_value, grad_weights, grad_biases = self._loss_and_grads(
-                    x_batch,
+                    train_batch,
                     y_batch,
                     weight_decay,
                     dropout_rng,
@@ -215,20 +259,63 @@ class SoftmaxClassifier:
 
             mean_epoch_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
             train_accuracy = self.score(features, labels)
+            if has_validation:
+                assert validated_val_features is not None
+                assert validated_val_labels is not None
+                val_accuracy = self.score(validated_val_features, validated_val_labels)
+            else:
+                val_accuracy = float("nan")
 
-            history.append(
-                {
-                    "epoch": float(epoch),
-                    "loss": mean_epoch_loss,
-                    "accuracy": float(train_accuracy),
-                }
-            )
+            history_entry = {
+                "epoch": float(epoch),
+                "loss": mean_epoch_loss,
+                "accuracy": float(train_accuracy),
+            }
+            if has_validation:
+                history_entry["val_accuracy"] = float(val_accuracy)
+
+            history.append(history_entry)
+
+            if has_validation:
+                improved = (val_accuracy - best_val_accuracy) > early_stopping_min_delta
+                if improved:
+                    best_val_accuracy = val_accuracy
+                    epochs_without_improvement = 0
+                    best_state = (
+                        [weights.copy() for weights in self.layer_weights],
+                        [bias.copy() for bias in self.layer_biases],
+                    )
+                else:
+                    epochs_without_improvement += 1
 
             if verbose:
-                print(
+                progress = (
                     f"[Classifier] Epoch {epoch:02d}/{epochs} | "
                     f"loss={mean_epoch_loss:.6f} | accuracy={train_accuracy:.4f}"
                 )
+                if has_validation:
+                    progress += f" | val_accuracy={val_accuracy:.4f}"
+                print(progress)
+
+            if (
+                has_validation
+                and early_stopping_patience > 0
+                and epochs_without_improvement >= early_stopping_patience
+            ):
+                if verbose:
+                    print(
+                        "[Classifier] Early stopping triggered: "
+                        f"no val_accuracy improvement > {early_stopping_min_delta:.6f} "
+                        f"for {early_stopping_patience} epochs."
+                    )
+                break
+
+        if has_validation and best_state is not None:
+            best_weights, best_biases = best_state
+            self.layer_weights = best_weights
+            self.layer_biases = best_biases
+            self.weights = self.layer_weights[-1]
+            self.bias = self.layer_biases[-1]
 
         return history
 

@@ -1,16 +1,16 @@
 CS-4375 Project Codebase — Casey Nguyen & Nguyen Phuc Do
 
-# FILE: src/__init__.py
+src/__init__.py
 """CS-4375 CDAE project package."""
 
-# FILE: src/classification/__init__.py
+src/classification/__init__.py
 from .pipeline import run_softmax_classification_on_denoised
 from .softmax_classifier import SoftmaxClassifier
 
 __all__ = ["SoftmaxClassifier", "run_softmax_classification_on_denoised"]
 
 
-# FILE: src/classification/pipeline.py
+src/classification/pipeline.py
 from __future__ import annotations
 
 import numpy as np
@@ -187,7 +187,7 @@ def run_softmax_classification_on_denoised(
     return result
 
 
-# FILE: src/classification/softmax_classifier.py
+src/classification/softmax_classifier.py
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
@@ -519,7 +519,7 @@ class SoftmaxClassifier:
         return float(np.mean(predictions == labels))
 
 
-# FILE: src/config.py
+src/config.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -579,7 +579,7 @@ def default_config() -> ProjectConfig:
     return ProjectConfig()
 
 
-# FILE: src/data/__init__.py
+src/data/__init__.py
 from .cifar10_loader import get_cifar10_dataset_summary, load_cifar10, validate_cifar10_dataset
 from .noise import add_gaussian_noise, add_salt_pepper_noise, sample_gaussian_noise_std
 from .preprocessing import normalize_images, resize_images, select_random_subset
@@ -597,7 +597,7 @@ __all__ = [
 ]
 
 
-# FILE: src/data/cifar10_loader.py
+src/data/cifar10_loader.py
 from __future__ import annotations
 
 import pickle
@@ -820,7 +820,7 @@ def validate_cifar10_dataset(y_train: np.ndarray, y_test: np.ndarray) -> dict[st
     return summary
 
 
-# FILE: src/data/noise.py
+src/data/noise.py
 from __future__ import annotations
 
 import numpy as np
@@ -877,7 +877,7 @@ def add_salt_pepper_noise(
     return noisy.astype(np.float32)
 
 
-# FILE: src/data/preprocessing.py
+src/data/preprocessing.py
 from __future__ import annotations
 
 import numpy as np
@@ -929,13 +929,13 @@ def resize_images(images: np.ndarray, target_size: int) -> np.ndarray:
     )
 
 
-# FILE: src/evaluation/__init__.py
+src/evaluation/__init__.py
 from .metrics import mse, psnr, rmse, ssim
 
 __all__ = ["mse", "rmse", "psnr", "ssim"]
 
 
-# FILE: src/evaluation/metrics.py
+src/evaluation/metrics.py
 from __future__ import annotations
 
 import numpy as np
@@ -1011,7 +1011,7 @@ def ssim(y_true: np.ndarray, y_pred: np.ndarray, max_pixel: float = 1.0) -> floa
     return _ssim_1d(x.reshape(-1), y.reshape(-1), c1, c2)
 
 
-# FILE: src/evaluation/visualize.py
+src/evaluation/visualize.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -1076,7 +1076,7 @@ def save_loss_curve(history: list[dict[str, float]], output_path: Path) -> None:
     plt.close(figure)
 
 
-# FILE: src/main.py
+src/main.py
 from __future__ import annotations
 
 import argparse
@@ -1997,14 +1997,14 @@ if __name__ == "__main__":
     main()
 
 
-# FILE: src/models/__init__.py
+src/models/__init__.py
 from .cdae import CDAE
 from .fcdae import FullyConnectedDAE
 
 __all__ = ["CDAE", "FullyConnectedDAE"]
 
 
-# FILE: src/models/cdae.py
+src/models/cdae.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -2309,7 +2309,7 @@ class CDAE:
         self.load_state_dict(state)
 
 
-# FILE: src/models/fcdae.py
+src/models/fcdae.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -2576,7 +2576,7 @@ class FullyConnectedDAE:
         self.load_state_dict(state)
 
 
-# FILE: src/models/layers.py
+src/models/layers.py
 from __future__ import annotations
 
 import numpy as np
@@ -2792,7 +2792,7 @@ class NearestUpsample2D:
         return grad_input.astype(np.float32)
 
 
-# FILE: src/training/__init__.py
+src/training/__init__.py
 from .kfold import run_kfold_experiment
 from .kfold import run_kfold_evaluation_only
 from .trainer import train_fold
@@ -2800,7 +2800,7 @@ from .trainer import train_fold
 __all__ = ["run_kfold_experiment", "run_kfold_evaluation_only", "train_fold"]
 
 
-# FILE: src/training/kfold.py
+src/training/kfold.py
 from __future__ import annotations
 
 import csv
@@ -3324,7 +3324,7 @@ def run_kfold_experiment(
     return fold_results
 
 
-# FILE: src/training/trainer.py
+src/training/trainer.py
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -3797,14 +3797,14 @@ def train_fold(
     return result
 
 
-# FILE: src/utils/__init__.py
+src/utils/__init__.py
 from .experiment_logger import ExperimentLogger
 from .random_seed import set_global_seed
 
 __all__ = ["ExperimentLogger", "set_global_seed"]
 
 
-# FILE: src/utils/experiment_logger.py
+src/utils/experiment_logger.py
 from __future__ import annotations
 
 import csv
@@ -3878,7 +3878,7 @@ class ExperimentLogger:
         return datetime.now(timezone.utc).isoformat()
 
 
-# FILE: src/utils/random_seed.py
+src/utils/random_seed.py
 from __future__ import annotations
 
 import random

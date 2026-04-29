@@ -13,13 +13,13 @@ try:
     from torchvision import datasets as tv_datasets
 
     HAS_TORCHVISION = True
-except Exception:  # pragma: no cover - fallback path is covered separately
+except Exception:  
     tv_datasets = None
     HAS_TORCHVISION = False
 
 try:
     from numpy.exceptions import VisibleDeprecationWarning
-except ImportError:  # pragma: no cover - fallback for older NumPy versions
+except ImportError:
     VisibleDeprecationWarning = Warning
 
 CIFAR10_NUM_CLASSES = 10
@@ -58,7 +58,7 @@ def _get_batch_value(batch_dict: dict[str, Any], key: str) -> Any:
     if key_bytes in batch_dict:
         return batch_dict[key_bytes]
 
-    raise KeyError(f"Missing key '{key}' in CIFAR-10 batch dictionary.")
+    raise KeyError(f"Missing key '{key}' in CIFAR-10.")
 
 
 def _reshape_images(flat_images: np.ndarray) -> np.ndarray:
@@ -83,14 +83,14 @@ def _download_and_extract_official_python_version(dataset_root: Path) -> Path:
     with tarfile.open(archive_path, "r:gz") as archive:
         archive.extractall(path=dataset_root)
 
-    # Archive is not required after extraction, so remove it to save storage.
+    # Archive is not required after extraction
     if archive_path.exists():
         archive_path.unlink()
 
     missing = [str(path) for path in _required_batch_paths(extracted_dir) if not path.exists()]
     if missing:
         raise FileNotFoundError(
-            "Official CIFAR-10 python version extraction failed. "
+            "Official CIFAR-10 python version failed. "
             f"Missing paths: {missing}"
         )
 
@@ -123,13 +123,12 @@ def load_cifar10(
     dataset_root: str | Path,
     download: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Load CIFAR-10 using official torchvision dataset utility.
+    """Load CIFAR-10 using torchvision dataset.
 
     Preferred path:
       torchvision.datasets.CIFAR10
 
-    Fallback path (when torchvision is unavailable):
-      official CIFAR-10 python-version archive from
+    Fallback path:
       https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     """
     dataset_root = Path(dataset_root)
@@ -151,7 +150,7 @@ def load_cifar10(
     if not has_extracted:
         if not download:
             raise FileNotFoundError(
-                "CIFAR-10 not found and download is disabled. "
+                "CIFAR-10 not found. "
                 f"Expected extracted data under: {extracted_dir}"
             )
         extracted_dir = _download_and_extract_official_python_version(dataset_root)

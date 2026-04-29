@@ -6,7 +6,7 @@ import numpy as np
 
 
 class FullyConnectedDAE:
-    """Fully connected denoising autoencoder implemented with NumPy."""
+    """Fully connected denoising autoencoder with NumPy."""
 
     def __init__(
         self,
@@ -71,7 +71,7 @@ class FullyConnectedDAE:
         noisy_images: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if noisy_images.ndim != 4:
-            raise ValueError("Expected noisy_images shape (N, H, W, C).")
+            raise ValueError("noisy_images has to have shape (N, H, W, C).")
 
         batch_size = int(noisy_images.shape[0])
         flattened = noisy_images.reshape(batch_size, self.input_dim).astype(np.float32)
@@ -85,7 +85,7 @@ class FullyConnectedDAE:
         return flattened, z1, a1, z2, a2
 
     def encode_features(self, noisy_images: np.ndarray) -> np.ndarray:
-        """Return bottleneck encoder activations for classifier features."""
+        """Return bottleneck encoder activations"""
         _, _, _, _, a2 = self._encode(noisy_images)
         return a2.astype(np.float32)
 

@@ -14,8 +14,8 @@ def _apply_standardization(
     mean: np.ndarray,
     std: np.ndarray,
 ) -> np.ndarray:
-    standardized = (features - mean) / std
-    return np.clip(standardized, -6.0, 6.0).astype(np.float32)
+    scaled_features = (features - mean) / std
+    return np.clip(scaled_features, -6.0, 6.0).astype(np.float32)
 
 
 def _encode_and_flatten_in_batches(
@@ -25,41 +25,41 @@ def _encode_and_flatten_in_batches(
     denoise_first: bool = False,
 ) -> np.ndarray:
     if batch_size <= 0:
-        raise ValueError("batch_size must be > 0.")
+        raise ValueError("batch_size has to be greater than 0.")
 
     if images.ndim != 4:
-        raise ValueError("images must have shape (N, H, W, C).")
+        raise ValueError("images has to be in the shape (N, H, W, C).")
 
-    sample_count = int(images.shape[0])
-    if sample_count == 0:
-        raise ValueError("images must contain at least one sample.")
+    image_count = int(images.shape[0])
+    if image_count == 0:
+        raise ValueError("images need at least one sample.")
 
     def _encode_batch(batch: np.ndarray) -> np.ndarray:
-        source_batch = np.asarray(batch, dtype=np.float32)
+        batch_data = np.asarray(batch, dtype=np.float32)
         if denoise_first:
-            source_batch = np.asarray(denoiser_model.forward(source_batch), dtype=np.float32)
+            batch_data = np.asarray(denoiser_model.forward(batch_data), dtype=np.float32)
 
         if hasattr(denoiser_model, "encode_features"):
-            return np.asarray(denoiser_model.encode_features(source_batch), dtype=np.float32)
+            return np.asarray(denoiser_model.encode_features(batch_data), dtype=np.float32)
 
         if denoise_first:
-            return source_batch
+            return batch_data
 
-        return np.asarray(denoiser_model.forward(source_batch), dtype=np.float32)
+        return np.asarray(denoiser_model.forward(batch_data), dtype=np.float32)
 
-    first_end = min(batch_size, sample_count)
-    first_encoded = _encode_batch(images[:first_end])
-    first_flattened = _flatten_images(first_encoded)
+    first_batch_end = min(batch_size, image_count)
+    first_batch = _encode_batch(images[:first_batch_end])
+    first_flattened = _flatten_images(first_batch)
 
-    features = np.empty((sample_count, first_flattened.shape[1]), dtype=np.float32)
-    features[:first_end] = first_flattened
+    encoded_features = np.empty((image_count, first_flattened.shape[1]), dtype=np.float32)
+    encoded_features[:first_batch_end] = first_flattened
 
-    for start in range(first_end, sample_count, batch_size):
-        end = min(start + batch_size, sample_count)
-        encoded_batch = _encode_batch(images[start:end])
-        features[start:end] = _flatten_images(encoded_batch)
+    for start_index in range(first_batch_end, image_count, batch_size):
+        end_index = min(start_index + batch_size, image_count)
+        batch_features = _encode_batch(images[start_index:end_index])
+        encoded_features[start_index:end_index] = _flatten_images(batch_features)
 
-    return features
+    return encoded_features
 
 
 def run_softmax_classification_on_denoised(
@@ -87,7 +87,7 @@ def run_softmax_classification_on_denoised(
     y_train = np.asarray(y_train, dtype=np.int64)
     y_val = np.asarray(y_val, dtype=np.int64)
 
-    # Use encoder features directly from noisy inputs for the classifier.
+    # Use the denoiser's encoded features.
     x_train_noisy = _encode_and_flatten_in_batches(
         denoiser_model,
         noisy_train,

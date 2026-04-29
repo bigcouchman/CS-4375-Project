@@ -24,7 +24,7 @@ def sample_gaussian_noise_std(
     for std in std_options:
         std_value = float(std)
         if std_value <= 0.0:
-            raise ValueError("All Gaussian std options must be > 0.")
+            raise ValueError("All Gaussian std options must be greather than 0.")
         cleaned.append(std_value)
 
     return float(rng.choice(np.asarray(cleaned, dtype=np.float32)))

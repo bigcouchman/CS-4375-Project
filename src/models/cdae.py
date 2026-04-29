@@ -8,7 +8,7 @@ from .layers import Conv2D, NearestUpsample2D, ReLU, Sigmoid
 
 
 class CDAE:
-    """Convolutional Denoising Autoencoder using custom NumPy layers."""
+    """Convolutional Denoising Autoencoder using NumPy layers."""
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class CDAE:
         self.output_act = Sigmoid()
 
     def encode_features(self, images: np.ndarray) -> np.ndarray:
-        """Return latent encoder representation before the decoder path."""
+        """Return latent encoder representation."""
         x = self.encoder_conv.forward(images)
         x = self.encoder_act.forward(x)
 

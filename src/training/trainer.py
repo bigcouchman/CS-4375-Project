@@ -18,7 +18,7 @@ def iterate_minibatches(
     seed: int,
 ) -> Iterator[tuple[np.ndarray, np.ndarray]]:
     if noisy_images.shape != clean_images.shape:
-        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+        raise ValueError("Noisy and clean image arrays has to have identical shapes.")
 
     rng = np.random.default_rng(seed)
     indices = np.arange(noisy_images.shape[0])
@@ -37,9 +37,9 @@ def compute_metrics(
     include_ssim: bool = False,
 ) -> dict[str, float]:
     if noisy_images.shape != clean_images.shape:
-        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+        raise ValueError("Noisy and clean image arrays has to have identical shapes.")
     if batch_size <= 0:
-        raise ValueError("batch_size must be > 0.")
+        raise ValueError("batch_size has to be greater than 0.")
 
     total_squared_error = 0.0
     total_elements = 0
@@ -89,7 +89,7 @@ def sample_metric_subset(
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     if noisy_images.shape != clean_images.shape:
-        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+        raise ValueError("Noisy and clean image arrays has to have identical shapes.")
 
     if max_samples <= 0 or max_samples >= noisy_images.shape[0]:
         return noisy_images, clean_images
@@ -107,10 +107,10 @@ def sample_epoch_subset(
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     if noisy_images.shape != clean_images.shape:
-        raise ValueError("Noisy and clean image arrays must have identical shapes.")
+        raise ValueError("Noisy and clean image arrays has to have identical shapes.")
 
     if min_samples < 0 or max_samples < 0:
-        raise ValueError("min_samples and max_samples must be >= 0.")
+        raise ValueError("min_samples and max_samples has to be greather than or equal to 0.")
 
     if max_samples == 0:
         return noisy_images, clean_images
@@ -142,18 +142,13 @@ def calibrate_skip_weight(
     clean_images: np.ndarray,
     batch_size: int,
 ) -> dict[str, float]:
-    """Calibrate residual skip weight on validation data to minimize MSE.
-
-    The model output is assumed to follow:
-        output = (1 - w) * decoded + w * noisy
-    where w is ``model.skip_connection_weight``.
-    """
+    """Modify residual skip weight on validation data to minimize MSE. """
 
     if not hasattr(model, "skip_connection_weight"):
         return {"applied": 0.0}
 
     if not hasattr(model, "output_act"):
-        # Restrict calibration to conv model path where output is not clipped post-blend.
+        # Restrict calibration to conv model.
         return {"applied": 0.0}
 
     current_w = float(getattr(model, "skip_connection_weight"))
@@ -238,11 +233,11 @@ def train_fold(
     loss_curve_update_every: int = 1,
 ) -> dict[str, object]:
     if loss_curve_update_every <= 0:
-        raise ValueError("loss_curve_update_every must be > 0.")
+        raise ValueError("loss_curve_update_every has to be greater than 0.")
     if train_metrics_max_samples < 0:
-        raise ValueError("train_metrics_max_samples must be >= 0.")
+        raise ValueError("train_metrics_max_samples has to be greater than or equal to 0.")
     if epoch_train_subset_min < 0 or epoch_train_subset_max < 0:
-        raise ValueError("epoch_train_subset_min and epoch_train_subset_max must be >= 0.")
+        raise ValueError("epoch_train_subset_min and epoch_train_subset_max has to be greater than or equal to 0.")
     if epoch_train_subset_max > 0 and epoch_train_subset_min > epoch_train_subset_max:
         raise ValueError("epoch_train_subset_min cannot be greater than epoch_train_subset_max.")
 

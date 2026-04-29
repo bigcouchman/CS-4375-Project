@@ -41,9 +41,9 @@ def _as_int(value: object, default: int = 0) -> int:
 
 
 def _fold_output_path(base_path: str | Path, fold_number: int, default_suffix: str) -> Path:
-    output_path = Path(base_path)
-    suffix = output_path.suffix or default_suffix
-    return output_path.with_name(f"{output_path.stem}_fold{fold_number}{suffix}")
+    target_path = Path(base_path)
+    suffix = target_path.suffix or default_suffix
+    return target_path.with_name(f"{target_path.stem}_fold{fold_number}{suffix}")
 
 
 def _write_prediction_samples(
@@ -53,18 +53,18 @@ def _write_prediction_samples(
     class_names: list[str] | None,
     max_rows: int,
 ) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path = Path(output_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    row_count = min(max_rows, y_true.shape[0], y_pred.shape[0])
+    row_limit = min(max_rows, y_true.shape[0], y_pred.shape[0])
     label_names = class_names or [str(index) for index in range(int(np.max(y_true)) + 1)]
 
-    with output_path.open("w", newline="", encoding="utf-8") as csv_file:
-        fieldnames = ["sample_index", "true_label", "predicted_label", "correct"]
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    with target_path.open("w", newline="", encoding="utf-8") as file_handle:
+        columns = ["sample_index", "true_label", "predicted_label", "correct"]
+        writer = csv.DictWriter(file_handle, fieldnames=columns)
         writer.writeheader()
 
-        for sample_index in range(row_count):
+        for sample_index in range(row_limit):
             true_index = int(y_true[sample_index])
             pred_index = int(y_pred[sample_index])
 
@@ -84,15 +84,15 @@ def _numpy_kfold_validation_indices(
     seed: int,
 ) -> list[np.ndarray]:
     if k_folds <= 1:
-        raise ValueError("k_folds must be >= 2.")
+        raise ValueError("k_folds must be greater or equal to 2.")
     if sample_count < k_folds:
-        raise ValueError("k_folds cannot be greater than number of samples.")
+        raise ValueError("k_folds is greater than number of samples.")
 
     rng = np.random.default_rng(seed)
-    shuffled_indices = np.arange(sample_count)
-    rng.shuffle(shuffled_indices)
+    sample_order = np.arange(sample_count)
+    rng.shuffle(sample_order)
 
-    folds = np.array_split(shuffled_indices, k_folds)
+    folds = np.array_split(sample_order, k_folds)
     return [np.asarray(fold, dtype=np.int64) for fold in folds]
 
 
@@ -130,7 +130,7 @@ def _print_kfold_eval_report(
     fold_results: list[dict[str, float]],
     summary: dict[str, float],
 ) -> None:
-    print("\nIEEE-Style K-Fold Evaluation (Inference Only)")
+    print("\nIEEE-Style K-Fold Evaluation")
     print("Fold |     MSE      |     RMSE     |   PSNR (dB)")
     print("-----+--------------+--------------+-------------")
     for row in fold_results:
@@ -159,11 +159,11 @@ def _write_kfold_eval_csv(
     fold_results: list[dict[str, float]],
     summary: dict[str, float],
 ) -> Path:
-    output_csv_path = Path(output_csv_path)
-    output_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    target_csv_path = Path(output_csv_path)
+    target_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with output_csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-        fieldnames = [
+    with target_csv_path.open("w", newline="", encoding="utf-8") as file_handle:
+        columns = [
             "row_type",
             "fold",
             "val_samples",
@@ -172,7 +172,7 @@ def _write_kfold_eval_csv(
             "val_psnr",
             "val_ssim",
         ]
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer = csv.DictWriter(file_handle, fieldnames=columns)
         writer.writeheader()
 
         for row in fold_results:
@@ -217,7 +217,7 @@ def _write_kfold_eval_csv(
             }
         )
 
-    return output_csv_path
+    return target_csv_path
 
 
 def run_kfold_evaluation_only(
@@ -233,9 +233,9 @@ def run_kfold_evaluation_only(
     track_ssim: bool = False,
 ) -> dict[str, object]:
     if clean_images.ndim != 4:
-        raise ValueError("clean_images must have shape (N, H, W, C).")
+        raise ValueError("clean_images has to have shape (N, H, W, C).")
     if batch_size <= 0:
-        raise ValueError("batch_size must be > 0.")
+        raise ValueError("batch_size has to be > 0.")
 
     val_folds = _numpy_kfold_validation_indices(
         sample_count=clean_images.shape[0],
@@ -261,7 +261,7 @@ def run_kfold_evaluation_only(
                 seed=seed + fold_number,
             )
         else:
-            raise ValueError(f"Unsupported noise_type for evaluation: {noise_type}")
+            raise ValueError(f"Undefined noise_type for evaluation: {noise_type}")
 
         fold_metrics = compute_metrics(
             model=model,
@@ -354,7 +354,7 @@ def run_kfold_experiment(
     epoch_train_subset_max: int = 0,
 ) -> list[dict[str, object]]:
     if clean_images.shape != noisy_images.shape:
-        raise ValueError("Clean and noisy arrays must have matching shapes.")
+        raise ValueError("Clean and noisy arrays have to have matching shapes.")
 
     splitter = KFold(n_splits=k_folds, shuffle=True, random_state=seed)
     fold_results: list[dict[str, object]] = []

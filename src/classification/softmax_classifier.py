@@ -6,10 +6,7 @@ import numpy as np
 
 
 class SoftmaxClassifier:
-    """Multiclass classifier implemented with NumPy.
-
-    When ``hidden_dims`` is empty, this behaves as plain softmax regression.
-    """
+    """Multiclass classifier using NumPy."""
 
     def __init__(
         self,
@@ -21,18 +18,18 @@ class SoftmaxClassifier:
         seed: int = 42,
     ) -> None:
         if input_dim <= 0:
-            raise ValueError("input_dim must be > 0.")
+            raise ValueError("input_dim has to be greater than 0.")
         if num_classes <= 1:
-            raise ValueError("num_classes must be > 1.")
+            raise ValueError("num_classes has to be greater than 1.")
 
         parsed_hidden_dims: tuple[int, ...] = tuple(int(dim) for dim in (hidden_dims or ()))
         if any(dim <= 0 for dim in parsed_hidden_dims):
-            raise ValueError("All hidden_dims values must be > 0.")
+            raise ValueError("All hidden_dims values has to be greater than 0.")
 
         if dropout_rate < 0.0 or dropout_rate >= 1.0:
-            raise ValueError("dropout_rate must satisfy 0.0 <= dropout_rate < 1.0.")
+            raise ValueError("dropout_rate has to satisfy 0.0 less than or equal to dropout_rate less thaN 1.0.")
         if input_noise_std < 0.0:
-            raise ValueError("input_noise_std must be >= 0.0.")
+            raise ValueError("input_noise_std has to be greater than or equal to 0.0.")
 
         self.dropout_rate = float(dropout_rate)
         self.input_noise_std = float(input_noise_std)
@@ -54,7 +51,7 @@ class SoftmaxClassifier:
             self.layer_weights.append(weights)
             self.layer_biases.append(bias)
 
-        # Compatibility aliases for existing usages/tests expecting these attributes.
+        # Compatibility aliases for existinig code
         self.weights = self.layer_weights[-1]
         self.bias = self.layer_biases[-1]
 
@@ -190,17 +187,17 @@ class SoftmaxClassifier:
         verbose: bool = False,
     ) -> list[dict[str, float]]:
         if features.ndim != 2:
-            raise ValueError("features must have shape (N, D).")
+            raise ValueError("features has to have shape (N, D).")
         if labels.ndim != 1:
-            raise ValueError("labels must have shape (N,).")
+            raise ValueError("labels has to have shape (N,).")
         if features.shape[0] != labels.shape[0]:
-            raise ValueError("features and labels must have same number of samples.")
+            raise ValueError("features and labels has to have same number of samples.")
         if batch_size <= 0:
-            raise ValueError("batch_size must be > 0.")
+            raise ValueError("batch_size has to be greater than 0.")
         if early_stopping_patience < 0:
-            raise ValueError("early_stopping_patience must be >= 0.")
+            raise ValueError("early_stopping_patience has to be >= 0.")
         if early_stopping_min_delta < 0.0:
-            raise ValueError("early_stopping_min_delta must be >= 0.0.")
+            raise ValueError("early_stopping_min_delta has to be >= 0.0.")
 
         use_validation = val_features is not None and val_labels is not None
         validated_val_features: np.ndarray | None = None
@@ -209,13 +206,13 @@ class SoftmaxClassifier:
             validated_val_features = np.asarray(val_features, dtype=np.float32)
             validated_val_labels = np.asarray(val_labels, dtype=np.int64)
             if validated_val_features.ndim != 2:
-                raise ValueError("val_features must have shape (N, D).")
+                raise ValueError("val_features has to have shape (N, D).")
             if validated_val_labels.ndim != 1:
-                raise ValueError("val_labels must have shape (N,).")
+                raise ValueError("val_labels has to have shape (N,).")
             if validated_val_features.shape[0] != validated_val_labels.shape[0]:
-                raise ValueError("val_features and val_labels must have same number of samples.")
+                raise ValueError("val_features and val_labels has to have same number of samples.")
             if validated_val_features.shape[1] != features.shape[1]:
-                raise ValueError("val_features must have same feature dimension as features.")
+                raise ValueError("val_features has to have same feature dimension as features.")
 
         has_validation = (
             validated_val_features is not None and validated_val_labels is not None

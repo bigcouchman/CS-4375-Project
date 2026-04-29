@@ -5,7 +5,7 @@ from typing import cast
 
 
 class Conv2D:
-    """NumPy Conv2D layer (NHWC format) with forward and backward passes."""
+    """NumPy Conv2D layer with forward and backward passes."""
 
     def __init__(
         self,
@@ -17,7 +17,7 @@ class Conv2D:
         seed: int | None = None,
     ) -> None:
         if stride <= 0:
-            raise ValueError("stride must be a positive integer.")
+            raise ValueError("stride has to be a positive integer.")
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -43,7 +43,7 @@ class Conv2D:
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         if x.ndim != 4:
-            raise ValueError("Conv2D expects input with shape (N, H, W, C).")
+            raise ValueError("Conv2D needs input with shape (N, H, W, C).")
 
         n, h, w, _ = x.shape
         k = self.kernel_size
@@ -53,7 +53,7 @@ class Conv2D:
         out_w = ((w + (2 * p) - k) // s) + 1
 
         if out_h <= 0 or out_w <= 0:
-            raise ValueError("Invalid output shape. Check kernel_size and padding.")
+            raise ValueError("Invalid output shape.")
 
         x_padded = np.pad(
             x,
@@ -80,7 +80,7 @@ class Conv2D:
         if self._cached_input is None:
             raise RuntimeError("Conv2D.backward called before forward.")
         if grad_output.ndim != 4:
-            raise ValueError("Conv2D backward expects grad_output with shape (N, H, W, C).")
+            raise ValueError("Conv2D backward needs grad_output with shape (N, H, W, C).")
 
         x = self._cached_input
         n, h, w, _ = x.shape
@@ -170,17 +170,17 @@ class Sigmoid:
 
 
 class NearestUpsample2D:
-    """Nearest-neighbor upsampling layer (NHWC) with backward pass."""
+    """Nearest neighbor upsampling layer with backward pass."""
 
     def __init__(self, scale: int = 2) -> None:
         if scale <= 0:
-            raise ValueError("scale must be a positive integer.")
+            raise ValueError("scale has to be a positive integer.")
         self.scale = scale
         self._cached_input_shape: tuple[int, int, int, int] | None = None
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         if x.ndim != 4:
-            raise ValueError("NearestUpsample2D expects input with shape (N, H, W, C).")
+            raise ValueError("NearestUpsample2D needs input with shape (N, H, W, C).")
 
         self._cached_input_shape = cast(tuple[int, int, int, int], x.shape)
         if self.scale == 1:
@@ -195,7 +195,7 @@ class NearestUpsample2D:
             raise RuntimeError("NearestUpsample2D.backward called before forward.")
         if grad_output.ndim != 4:
             raise ValueError(
-                "NearestUpsample2D backward expects grad_output with shape (N, H, W, C)."
+                "NearestUpsample2D backward needs grad_output with shape (N, H, W, C)."
             )
 
         n, h, w, c = self._cached_input_shape

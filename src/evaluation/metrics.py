@@ -39,7 +39,7 @@ def _ssim_1d(x: np.ndarray, y: np.ndarray, c1: float, c2: float) -> float:
 
 def ssim(y_true: np.ndarray, y_pred: np.ndarray, max_pixel: float = 1.0) -> float:
     if y_true.shape != y_pred.shape:
-        raise ValueError("y_true and y_pred must have identical shapes for SSIM.")
+        raise ValueError("y_true and y_pred has to have the same shapes for SSIM.")
 
     c1 = (0.01 * max_pixel) ** 2
     c2 = (0.03 * max_pixel) ** 2

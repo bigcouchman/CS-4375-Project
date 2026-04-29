@@ -37,7 +37,6 @@ env/
 /reports/tables/*
 !/reports/tables/.gitkeep
 !/reports/tables/denoise_focus_summary_latest.csv
-!/reports/tables/final_results.csv
 !/reports/tables/kfold_eval_summary_latest.csv
 !/reports/tables/full_predictions.csv
 

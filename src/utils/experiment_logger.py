@@ -15,45 +15,45 @@ class ExperimentLogger:
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log_run(self, row: dict[str, object]) -> None:
-        fieldnames = list(row.keys())
+        columns = list(row.keys())
 
         if not self.csv_path.exists():
-            with self.csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            with self.csv_path.open("w", newline="", encoding="utf-8") as file_handle:
+                writer = csv.DictWriter(file_handle, fieldnames=columns)
                 writer.writeheader()
                 writer.writerow(row)
             return
 
-        with self.csv_path.open("r", newline="", encoding="utf-8") as csv_file:
-            reader = csv.DictReader(csv_file)
-            existing_fieldnames = reader.fieldnames or []
-            existing_rows = list(reader)
+        with self.csv_path.open("r", newline="", encoding="utf-8") as file_handle:
+            reader = csv.DictReader(file_handle)
+            saved_columns = reader.fieldnames or []
+            saved_rows = list(reader)
 
-        if existing_fieldnames != fieldnames:
-            merged_fieldnames = list(existing_fieldnames)
-            for fieldname in fieldnames:
-                if fieldname not in merged_fieldnames:
-                    merged_fieldnames.append(fieldname)
+        if saved_columns != columns:
+            merged_columns = list(saved_columns)
+            for column in columns:
+                if column not in merged_columns:
+                    merged_columns.append(column)
 
-            with self.csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=merged_fieldnames)
+            with self.csv_path.open("w", newline="", encoding="utf-8") as file_handle:
+                writer = csv.DictWriter(file_handle, fieldnames=merged_columns)
                 writer.writeheader()
-                for existing_row in existing_rows:
-                    writer.writerow(existing_row)
+                for saved_row in saved_rows:
+                    writer.writerow(saved_row)
                 writer.writerow(row)
             return
 
-        with self.csv_path.open("a", newline="", encoding="utf-8") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        with self.csv_path.open("a", newline="", encoding="utf-8") as file_handle:
+            writer = csv.DictWriter(file_handle, fieldnames=columns)
             writer.writerow(row)
 
     def next_experiment_id(self) -> int:
         if not self.csv_path.exists():
             return 1
 
-        with self.csv_path.open("r", newline="", encoding="utf-8") as csv_file:
-            reader = csv.DictReader(csv_file)
-            max_id = 0
+        with self.csv_path.open("r", newline="", encoding="utf-8") as file_handle:
+            reader = csv.DictReader(file_handle)
+            highest_id = 0
             for row in reader:
                 raw_value = row.get("experiment_id", "")
                 try:
@@ -61,10 +61,10 @@ class ExperimentLogger:
                 except (TypeError, ValueError):
                     continue
 
-                if experiment_id > max_id:
-                    max_id = experiment_id
+                if experiment_id > highest_id:
+                    highest_id = experiment_id
 
-        return max_id + 1
+        return highest_id + 1
 
     @staticmethod
     def utc_timestamp() -> str:

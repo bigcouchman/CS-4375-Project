@@ -83,7 +83,7 @@ def _as_object_dict_list(value: object) -> list[dict[str, object]]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CDAE CIFAR-10 denoising with custom NumPy layers")
+    parser = argparse.ArgumentParser(description="CDAE CIFAR-10 denoising with NumPy layers")
     parser.add_argument("--mode", choices=["kfold", "single", "kfold_eval"], default="kfold")
     parser.add_argument("--model-type", choices=["conv", "fc"], default="conv")
     parser.add_argument("--fc-hidden-dim", type=int, default=512)
@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
         "--download-dataset",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Download CIFAR-10 automatically via torchvision on first run.",
+        help="Download CIFAR-10 by way of torchvision..",
     )
     parser.add_argument("--k-folds", type=int, default=5)
     parser.add_argument("--epochs", type=int, default=30)
@@ -109,13 +109,13 @@ def parse_args() -> argparse.Namespace:
         "--conv-skip-connection-weight",
         type=float,
         default=0.8,
-        help="Residual blend weight for conv model output: final=(1-w)*decoded + w*noisy.",
+        help="Residual blend weight for conv model",
     )
     parser.add_argument(
         "--l1-weight",
         type=float,
         default=0.0,
-        help="Optional L1 term weight in reconstruction loss: loss = MSE + l1_weight * MAE",
+        help="Optional L1 term weight in reconstruction loss.",
     )
     parser.add_argument("--noise-type", choices=["gaussian", "salt_pepper"], default="gaussian")
     parser.add_argument("--noise-std", type=float, default=0.05)
@@ -123,13 +123,13 @@ def parse_args() -> argparse.Namespace:
         "--sample-noise-per-batch",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="For gaussian noise, resample std per mini-batch from --batch-noise-std-options.",
+        help="For gaussian noise",
     )
     parser.add_argument(
         "--batch-noise-std-options",
         type=str,
         default="0.04,0.05,0.06",
-        help="Comma-separated std values used when --sample-noise-per-batch is enabled.",
+        help="Comma-separated std values used.",
     )
     parser.add_argument("--salt-pepper-amount", type=float, default=0.01)
     parser.add_argument("--max-samples", type=int, default=2000)
@@ -139,7 +139,7 @@ def parse_args() -> argparse.Namespace:
         "--random-subset",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Randomly sample the requested subset size from train/test before training/evaluation.",
+        help="Randomly sample the requested subset size.",
     )
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--resume-checkpoint", type=str, default="")
@@ -148,29 +148,28 @@ def parse_args() -> argparse.Namespace:
         "--save-figure",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Save denoising figure output (enabled by default).",
+        help="Save denoising figure.",
     )
     parser.add_argument("--figure-name", type=str, default="denoising_preview.png")
     parser.add_argument(
         "--save-loss-curve",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Save training loss curve output (enabled by default).",
+        help="Save training loss curve.",
     )
     parser.add_argument("--loss-curve-name", type=str, default="training_loss_curve.png")
     parser.add_argument(
         "--loss-curve-update-every",
         type=int,
         default=1,
-        help="Refresh the loss-curve image every N epochs during training.",
+        help="Refresh the loss curve image every N epochs.",
     )
     parser.add_argument(
         "--train-metrics-max-samples",
         type=int,
         default=1024,
         help=(
-            "Max number of train samples to use for per-epoch train metrics; "
-            "0 means full train split."
+            "Max number of train samples to use for per-epoch."
         ),
     )
     parser.add_argument(
@@ -178,8 +177,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1800,
         help=(
-            "Per-epoch minimum training subset size sampled from the train split; "
-            "set 0 to disable dynamic per-epoch subset sampling."
+            "Per-epoch minimum training subset size sampled from the train split."
         ),
     )
     parser.add_argument(
@@ -187,8 +185,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1800,
         help=(
-            "Per-epoch maximum training subset size sampled from the train split; "
-            "set 0 to disable dynamic per-epoch subset sampling."
+            "Per-epoch maximum training subset size sampled from the train split."
         ),
     )
     parser.add_argument(
@@ -206,7 +203,7 @@ def parse_args() -> argparse.Namespace:
         "--classifier-hidden-dims",
         type=str,
         default="32",
-        help="Comma-separated hidden layer sizes for classifier MLP; empty string disables hidden layers.",
+        help="Comma-separated hidden layer sizes for classifier MLP.",
     )
     parser.add_argument(
         "--classifier-dropout",
@@ -244,7 +241,7 @@ def parse_args() -> argparse.Namespace:
         "--track-ssim",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Compute SSIM in addition to MSE/RMSE/PSNR.",
+        help="Compute SSIM",
     )
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -307,7 +304,7 @@ def parse_batch_noise_std_options(raw_options: str) -> tuple[float, ...]:
             continue
         value = float(token)
         if value <= 0.0:
-            raise ValueError("All --batch-noise-std-options values must be > 0.")
+            raise ValueError("All --batch-noise-std-options values has to be greater than 0.")
         cleaned_options.append(value)
 
     if not cleaned_options:
@@ -324,7 +321,7 @@ def parse_classifier_hidden_dims(raw_dims: str) -> tuple[int, ...]:
             continue
         value = int(token)
         if value <= 0:
-            raise ValueError("All --classifier-hidden-dims values must be > 0.")
+            raise ValueError("All --classifier-hidden-dims values has to be greater than 0.")
         cleaned_dims.append(value)
 
     return tuple(cleaned_dims)
@@ -493,13 +490,13 @@ def main() -> None:
     test_sample_count = min(args.max_test_samples, x_test.shape[0])
 
     if args.random_subset:
-        clean_images, train_labels = select_random_subset(
+        train_images, train_labels = select_random_subset(
             x_train,
             y_train,
             max_samples=sample_count,
             seed=cfg.train.random_seed,
         )
-        clean_test_images, test_labels = select_random_subset(
+        test_images, test_labels = select_random_subset(
             x_test,
             y_test,
             max_samples=test_sample_count,
@@ -507,18 +504,18 @@ def main() -> None:
         )
         print(
             "[INFO] Using randomized subset: "
-            f"train={clean_images.shape[0]} test={clean_test_images.shape[0]}"
+            f"train={train_images.shape[0]} test={test_images.shape[0]}"
         )
     else:
-        clean_images = x_train[:sample_count]
-        clean_test_images = x_test[:test_sample_count]
+        train_images = x_train[:sample_count]
+        test_images = x_test[:test_sample_count]
         train_labels = y_train[:sample_count]
         test_labels = y_test[:test_sample_count]
 
     def build_model():
         if args.model_type == "conv":
             model = CDAE(
-                input_channels=int(clean_images.shape[-1]),
+                input_channels=int(train_images.shape[-1]),
                 latent_channels=args.latent_channels,
                 seed=cfg.train.random_seed,
                 l1_weight=args.l1_weight,
@@ -527,9 +524,9 @@ def main() -> None:
         else:
             model = FullyConnectedDAE(
                 input_shape=(
-                    int(clean_images.shape[1]),
-                    int(clean_images.shape[2]),
-                    int(clean_images.shape[3]),
+                    int(train_images.shape[1]),
+                    int(train_images.shape[2]),
+                    int(train_images.shape[3]),
                 ),
                 hidden_dim=args.fc_hidden_dim,
                 bottleneck_dim=args.fc_bottleneck_dim,
@@ -544,24 +541,24 @@ def main() -> None:
 
         return model
 
-    logger = ExperimentLogger(cfg.paths.logs_csv_path)
-    next_experiment_id = logger.next_experiment_id()
-    batch_noise_std_options = parse_batch_noise_std_options(args.batch_noise_std_options)
-    classifier_hidden_dims = parse_classifier_hidden_dims(args.classifier_hidden_dims)
+    run_logger = ExperimentLogger(cfg.paths.logs_csv_path)
+    next_run_id = run_logger.next_experiment_id()
+    batch_noise_values = parse_batch_noise_std_options(args.batch_noise_std_options)
+    classifier_hidden_sizes = parse_classifier_hidden_dims(args.classifier_hidden_dims)
 
     if args.classifier_dropout < 0.0 or args.classifier_dropout >= 1.0:
-        raise ValueError("--classifier-dropout must satisfy 0.0 <= value < 1.0.")
+        raise ValueError("--classifier-dropout HAS TO satisfy 0.0 <= value < 1.0.")
 
     if cfg.train.mode == "kfold_eval":
         if not args.resume_checkpoint:
             raise ValueError(
-                "kfold_eval mode requires --resume-checkpoint to evaluate a pre-trained model."
+                "kfold_eval mode needs --resume-checkpoint to evaluate a pre-trained model."
             )
 
         model = build_model()
         eval_result = run_kfold_evaluation_only(
             model=model,
-            clean_images=clean_images,
+            clean_images=train_images,
             k_folds=cfg.train.k_folds,
             batch_size=cfg.train.batch_size,
             seed=cfg.train.random_seed,
@@ -572,24 +569,24 @@ def main() -> None:
             track_ssim=args.track_ssim,
         )
 
-        fold_results = _as_object_dict_list(eval_result.get("fold_results", []))
-        for result in fold_results:
-            fold_number = _as_int(result.get("fold"), default=0)
-            logger.log_run(
+        fold_rows = _as_object_dict_list(eval_result.get("fold_results", []))
+        for fold_row in fold_rows:
+            fold_number = _as_int(fold_row.get("fold"), default=0)
+            run_logger.log_run(
                 make_log_row(
-                    experiment_id=next_experiment_id,
-                    result=result,
+                    experiment_id=next_run_id,
+                    result=fold_row,
                     args=args,
                     mode="kfold_eval",
                     fold=fold_number,
-                    logger=logger,
+                    logger=run_logger,
                     checkpoint_path=args.resume_checkpoint,
-                    train_sample_count=sample_count,
-                    test_sample_count=test_sample_count,
-                    notes="kfold evaluation only (no retraining)",
+                    train_sample_count=train_images.shape[0],
+                    test_sample_count=test_images.shape[0],
+                    notes="kfold evaluation only",
                 )
             )
-            next_experiment_id += 1
+            next_run_id += 1
 
         eval_summary = _as_object_dict(eval_result.get("summary", {}))
         print("\nK-Fold Evaluation Summary (mean +/- std):")
@@ -613,14 +610,14 @@ def main() -> None:
         return
 
     noisy_images = create_noisy_images(
-        clean_images,
+        train_images,
         noise_type=cfg.noise.noise_type,
         noise_std=cfg.noise.std,
         salt_pepper_amount=args.salt_pepper_amount,
         seed=cfg.train.random_seed,
     )
     noisy_test_images = create_noisy_images(
-        clean_test_images,
+        test_images,
         noise_type=cfg.noise.noise_type,
         noise_std=cfg.noise.std,
         salt_pepper_amount=args.salt_pepper_amount,
@@ -633,8 +630,8 @@ def main() -> None:
             checkpoint_target = Path(args.save_checkpoint)
             checkpoint_prefix = str(checkpoint_target.with_suffix(""))
 
-        fold_results = run_kfold_experiment(
-            clean_images=clean_images,
+        fold_rows = run_kfold_experiment(
+            clean_images=train_images,
             noisy_images=noisy_images,
             model_builder=build_model,
             k_folds=cfg.train.k_folds,
@@ -647,7 +644,7 @@ def main() -> None:
             lr_decay_every=args.lr_decay_every,
             early_stopping_patience=args.early_stopping_patience,
             min_delta=args.min_delta,
-            clean_test=clean_test_images,
+            clean_test=test_images,
             noisy_test=noisy_test_images,
             checkpoint_prefix=checkpoint_prefix or None,
             train_labels=train_labels,
@@ -658,7 +655,7 @@ def main() -> None:
             classifier_learning_rate=args.classifier_learning_rate,
             classifier_weight_decay=args.classifier_weight_decay,
             classifier_seed=args.classifier_seed,
-            classifier_hidden_dims=classifier_hidden_dims,
+            classifier_hidden_dims=classifier_hidden_sizes,
             classifier_dropout=args.classifier_dropout,
             classifier_feature_noise_std=args.classifier_feature_noise_std,
             classifier_early_stopping_patience=args.classifier_early_stopping_patience,
@@ -675,7 +672,7 @@ def main() -> None:
             loss_curve_update_every=args.loss_curve_update_every,
             noise_type=cfg.noise.noise_type,
             salt_pepper_amount=args.salt_pepper_amount,
-            batch_noise_std_options=batch_noise_std_options,
+            batch_noise_std_options=batch_noise_values,
             sample_noise_per_batch=args.sample_noise_per_batch,
             track_ssim=args.track_ssim,
             train_metrics_max_samples=args.train_metrics_max_samples,
@@ -683,25 +680,25 @@ def main() -> None:
             epoch_train_subset_max=args.epoch_train_subset_max,
         )
 
-        for result in fold_results:
-            fold_number = _as_int(result.get("fold"), default=0)
-            logger.log_run(
+        for fold_row in fold_rows:
+            fold_number = _as_int(fold_row.get("fold"), default=0)
+            run_logger.log_run(
                 make_log_row(
-                    experiment_id=next_experiment_id,
-                    result=result,
+                    experiment_id=next_run_id,
+                    result=fold_row,
                     args=args,
                     mode="kfold",
                     fold=fold_number,
-                    logger=logger,
-                    checkpoint_path=str(result.get("checkpoint_path", "")),
-                    train_sample_count=sample_count,
-                    test_sample_count=test_sample_count,
+                    logger=run_logger,
+                    checkpoint_path=str(fold_row.get("checkpoint_path", "")),
+                    train_sample_count=train_images.shape[0],
+                    test_sample_count=test_images.shape[0],
                     notes=f"custom numpy {args.model_type} denoiser kfold run",
                 )
             )
-            next_experiment_id += 1
+            next_run_id += 1
 
-        summary = summarize_fold_results(fold_results)
+        summary = summarize_fold_results(fold_rows)
         print("\nK-Fold Summary:")
         for key, value in summary.items():
             print(f"  {key}: {value:.6f}")
@@ -709,14 +706,14 @@ def main() -> None:
         if args.save_figure:
             figure_base = cfg.paths.figure_output_dir / args.figure_name
             print(
-                "[INFO] Saved K-fold denoising figures with suffixes to: "
+                "[INFO] Saved K-fold denoising figures to: "
                 f"{figure_base.parent} (e.g., {figure_base.stem}_fold1{figure_base.suffix or '.png'})"
             )
 
         if args.save_predictions and args.run_classification:
             predictions_base = Path(args.predictions_output)
             print(
-                "[INFO] Saved K-fold prediction samples with suffixes to: "
+                "[INFO] Saved K-fold prediction samples to: "
                 f"{predictions_base.parent} "
                 f"(e.g., {predictions_base.stem}_fold1{predictions_base.suffix or '.csv'})"
             )
@@ -724,37 +721,37 @@ def main() -> None:
         if args.save_loss_curve:
             loss_curve_base = cfg.paths.figure_output_dir / args.loss_curve_name
             print(
-                "[INFO] Saved K-fold loss curves with suffixes to: "
+                "[INFO] Saved K-fold loss curves to: "
                 f"{loss_curve_base.parent} "
                 f"(e.g., {loss_curve_base.stem}_fold1{loss_curve_base.suffix or '.png'})"
             )
 
         best_checkpoint_candidates = {
-            str(result.get("best_checkpoint_path", ""))
-            for result in fold_results
-            if str(result.get("best_checkpoint_path", ""))
+            str(fold_row.get("best_checkpoint_path", ""))
+            for fold_row in fold_rows
+            if str(fold_row.get("best_checkpoint_path", ""))
         }
         if best_checkpoint_candidates:
             best_checkpoint_path = sorted(best_checkpoint_candidates)[0]
             print(f"[INFO] Saved best K-fold checkpoint to: {best_checkpoint_path}")
 
     else:
-        indices = np.arange(clean_images.shape[0])
-        stratify_labels = train_labels if 0.0 < args.val_ratio < 1.0 else None
+        sample_indices = np.arange(train_images.shape[0])
+        split_targets = train_labels if 0.0 < args.val_ratio < 1.0 else None
         try:
             train_indices, val_indices = train_test_split(
-                indices,
+                sample_indices,
                 test_size=args.val_ratio,
                 random_state=cfg.train.random_seed,
                 shuffle=True,
-                stratify=stratify_labels,
+                stratify=split_targets,
             )
         except ValueError:
             print(
-                "[WARN] Falling back to non-stratified train/val split due to limited per-class samples."
+                "[WARN] Falling back train/val split due to small per class samples."
             )
             train_indices, val_indices = train_test_split(
-                indices,
+                sample_indices,
                 test_size=args.val_ratio,
                 random_state=cfg.train.random_seed,
                 shuffle=True,
@@ -762,8 +759,8 @@ def main() -> None:
 
         noisy_train = noisy_images[train_indices]
         noisy_val = noisy_images[val_indices]
-        clean_train = clean_images[train_indices]
-        clean_val = clean_images[val_indices]
+        clean_train = train_images[train_indices]
+        clean_val = train_images[val_indices]
         train_split_labels = train_labels[train_indices]
         val_split_labels = train_labels[val_indices]
         single_loss_curve_path = (
@@ -787,10 +784,10 @@ def main() -> None:
             early_stopping_patience=args.early_stopping_patience,
             min_delta=args.min_delta,
             noisy_test=noisy_test_images,
-            clean_test=clean_test_images,
+            clean_test=test_images,
             noise_type=cfg.noise.noise_type,
             salt_pepper_amount=args.salt_pepper_amount,
-            batch_noise_std_options=batch_noise_std_options,
+            batch_noise_std_options=batch_noise_values,
             sample_noise_per_batch=args.sample_noise_per_batch,
             track_ssim=args.track_ssim,
             train_metrics_max_samples=args.train_metrics_max_samples,
@@ -817,7 +814,7 @@ def main() -> None:
                 weight_decay=args.classifier_weight_decay,
                 seed=args.classifier_seed,
                 denoise_batch_size=args.batch_size,
-                classifier_hidden_dims=classifier_hidden_dims,
+                classifier_hidden_dims=classifier_hidden_sizes,
                 classifier_dropout=args.classifier_dropout,
                 classifier_feature_noise_std=args.classifier_feature_noise_std,
                 classifier_early_stopping_patience=args.classifier_early_stopping_patience,
@@ -868,21 +865,21 @@ def main() -> None:
             result["loss_curve_path"] = str(single_loss_curve_path)
             print(f"[INFO] Saved training loss curve to: {single_loss_curve_path}")
 
-        logger.log_run(
+        run_logger.log_run(
             make_log_row(
-                experiment_id=next_experiment_id,
+                experiment_id=next_run_id,
                 result=result,
                 args=args,
                 mode="single",
                 fold=1,
-                logger=logger,
+                logger=run_logger,
                 checkpoint_path=checkpoint_path,
-                train_sample_count=sample_count,
-                test_sample_count=test_sample_count,
-                notes=f"custom numpy {args.model_type} denoiser single run",
+                train_sample_count=train_images.shape[0],
+                test_sample_count=test_images.shape[0],
+                notes=f"numpy {args.model_type} denoiser single run",
             )
         )
-        next_experiment_id += 1
+        next_run_id += 1
 
         print("\nSingle Split Summary:")
         print(f"  best_epoch: {_as_int(result.get('best_epoch'), default=0)}")

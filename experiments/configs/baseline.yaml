@@ -8,39 +8,39 @@ dataset:
   name: "CIFAR-10"
   root: "data"
   normalize: true
-  max_train_samples: 4000
-  max_test_samples: 1000
+  max_train_samples: 4800
+  max_test_samples: 1200
 
 training:
   mode: "single"
   k_folds: 5
-  epochs: 10
+  epochs: 80
   batch_size: 32
   learning_rate: 0.001
-  lr_decay: 0.95
-  lr_decay_every: 2
-  early_stopping_patience: 4
-  min_delta: 0.0001
+  lr_decay: 0.995
+  lr_decay_every: 1
+  early_stopping_patience: 12
+  min_delta: 0.0
   seed: 42
 
 noise:
   type: "gaussian"
-  std: 0.1
+  std: 0.05
   salt_pepper_amount: 0.01
 
 model:
   input_shape: [32, 32, 3]
-  latent_channels: 32
-  regularization: 0.0001
+  latent_channels: 96
+  regularization: 0.05
 
 classification:
   enabled: true
   algorithm: "custom_softmax_regression"
-  epochs: 25
-  batch_size: 64
-  learning_rate: 0.08
-  weight_decay: 0.0001
+  epochs: 20
+  batch_size: 32
+  learning_rate: 0.003
+  weight_decay: 0.002
 
 logging:
   output_csv: "experiments/logs/experiment_runs.csv"
-  predictions_output_csv: "reports/tables/base_predictions.csv"
+  predictions_output_csv: "reports/tables/full_predictions.csv"

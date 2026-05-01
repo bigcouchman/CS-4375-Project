@@ -4,10 +4,9 @@ import numpy as np
 
 from .softmax_classifier import SoftmaxClassifier
 
-
+# Image compressing and standardizing feature
 def _flatten_images(images: np.ndarray) -> np.ndarray:
     return images.reshape(images.shape[0], -1).astype(np.float32)
-
 
 def _apply_standardization(
     features: np.ndarray,
@@ -17,13 +16,14 @@ def _apply_standardization(
     scaled_features = (features - mean) / std
     return np.clip(scaled_features, -6.0, 6.0).astype(np.float32)
 
-
+# Process one batch of data at a time using the nested function
 def _encode_and_flatten_in_batches(
     denoiser_model,
     images: np.ndarray,
     batch_size: int,
     denoise_first: bool = False,
 ) -> np.ndarray:
+    # Check batch size before encoding
     if batch_size <= 0:
         raise ValueError("batch_size has to be greater than 0.")
 
@@ -33,7 +33,7 @@ def _encode_and_flatten_in_batches(
     image_count = int(images.shape[0])
     if image_count == 0:
         raise ValueError("images need at least one sample.")
-
+        
     def _encode_batch(batch: np.ndarray) -> np.ndarray:
         batch_data = np.asarray(batch, dtype=np.float32)
         if denoise_first:
@@ -51,6 +51,7 @@ def _encode_and_flatten_in_batches(
     first_batch = _encode_batch(images[:first_batch_end])
     first_flattened = _flatten_images(first_batch)
 
+    # Gather encoded features from the flattend image
     encoded_features = np.empty((image_count, first_flattened.shape[1]), dtype=np.float32)
     encoded_features[:first_batch_end] = first_flattened
 
@@ -61,7 +62,7 @@ def _encode_and_flatten_in_batches(
 
     return encoded_features
 
-
+# Softmax regression classifier on denoised images
 def run_softmax_classification_on_denoised(
     denoiser_model,
     noisy_train: np.ndarray,
@@ -101,6 +102,7 @@ def run_softmax_classification_on_denoised(
         denoise_first=False,
     )
 
+    # Prepare and fit training features and classes
     x_train_fit = x_train_noisy
     y_train_fit = y_train
     if clean_train is not None:
@@ -129,6 +131,7 @@ def run_softmax_classification_on_denoised(
         y_test = np.asarray(y_test, dtype=np.int64)
         class_count = int(max(class_count - 1, int(np.max(y_test))) + 1)
 
+    # Classifier pipeline and tracking parameters in for every run
     classifier = SoftmaxClassifier(
         input_dim=x_train_fit.shape[1],
         num_classes=class_count,

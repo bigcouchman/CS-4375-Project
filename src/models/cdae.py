@@ -1,3 +1,4 @@
+# Convolutional Denoising Autoencoder logic
 from __future__ import annotations
 
 from pathlib import Path
@@ -107,6 +108,7 @@ class CDAE:
         x = self.bottleneck_refine_act.forward(x)
         return x.astype(np.float32)
 
+    # Forward pass of denoising process
     def forward(self, noisy_images: np.ndarray) -> np.ndarray:
         x = self.encode_features(noisy_images)
 
@@ -133,6 +135,7 @@ class CDAE:
 
         return decoded
 
+    # Calculate mean square error and mean absolute error and gradients
     @staticmethod
     def mse_loss(predictions: np.ndarray, targets: np.ndarray) -> float:
         return float(np.mean((predictions - targets) ** 2))
@@ -165,6 +168,7 @@ class CDAE:
         loss, _ = self.loss_and_grad(reconstructed, clean_batch)
         return loss, reconstructed
 
+    # Gradient descent via backward pass
     def backward_and_update(
         self,
         loss_grad: np.ndarray,

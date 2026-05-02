@@ -1,3 +1,4 @@
+# Fully connected denoising autoencoder logic
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,6 +49,7 @@ class FullyConnectedDAE:
         self._cached_a3: np.ndarray | None = None
         self._cached_sigmoid: np.ndarray | None = None
 
+    # activation functions for FCDAE
     @staticmethod
     def _xavier_init(rng: np.random.Generator, fan_in: int, fan_out: int) -> np.ndarray:
         limit = np.sqrt(6.0 / (fan_in + fan_out))
@@ -66,6 +68,7 @@ class FullyConnectedDAE:
         clipped = np.clip(x, -30.0, 30.0)
         return 1.0 / (1.0 + np.exp(-clipped))
 
+    # Encode images and their features to begin forward pass
     def _encode(
         self,
         noisy_images: np.ndarray,
@@ -119,7 +122,8 @@ class FullyConnectedDAE:
 
         return reconstructed.reshape(noisy_images.shape)
 
-    @staticmethod
+    # Calculating mean square error and mean absolute error and gradients
+    @staticmethod   
     def mse_loss(predictions: np.ndarray, targets: np.ndarray) -> float:
         return float(np.mean((predictions - targets) ** 2, dtype=np.float32))
 
@@ -151,6 +155,7 @@ class FullyConnectedDAE:
         loss, _ = self.loss_and_grad(reconstructed, clean_batch)
         return loss, reconstructed
 
+    # Gradient descent through backward pass
     def backward_and_update(
         self,
         loss_grad: np.ndarray,

@@ -1,8 +1,9 @@
+# Apply various noises to images for reconstruciton
 from __future__ import annotations
 
 import numpy as np
 
-
+# Apply Gaussian noise and random sampling to the image
 def add_gaussian_noise(
     images: np.ndarray,
     std: float = 0.1,
@@ -29,7 +30,7 @@ def sample_gaussian_noise_std(
 
     return float(rng.choice(np.asarray(cleaned, dtype=np.float32)))
 
-
+# Apply impulse noise to images
 def add_salt_pepper_noise(
     images: np.ndarray,
     amount: float = 0.01,

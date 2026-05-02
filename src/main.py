@@ -1,3 +1,4 @@
+# Main program running everything
 from __future__ import annotations
 
 import argparse
@@ -278,7 +279,7 @@ def summarize_fold_results(fold_results: list[dict[str, object]]) -> dict[str, f
 
     return summary
 
-
+# Corrupt images by applying either gaussian or impulse noises to inputs
 def create_noisy_images(
     clean_images: np.ndarray,
     noise_type: str,
@@ -295,7 +296,7 @@ def create_noisy_images(
         seed=seed,
     )
 
-
+# Parse batch noise and hidden dimensions of classifier
 def parse_batch_noise_std_options(raw_options: str) -> tuple[float, ...]:
     cleaned_options: list[float] = []
     for token in raw_options.split(","):
@@ -461,6 +462,7 @@ def main() -> None:
 
     set_global_seed(cfg.train.random_seed)
 
+    # Download CIFAR-10 dataset
     print("Loading CIFAR-10...")
     x_train, y_train, x_test, y_test = load_cifar10(
         cfg.paths.data_root,
@@ -512,6 +514,7 @@ def main() -> None:
         train_labels = y_train[:sample_count]
         test_labels = y_test[:test_sample_count]
 
+    # Create convolutional or fully connected models for image denoising
     def build_model():
         if args.model_type == "conv":
             model = CDAE(
@@ -541,6 +544,7 @@ def main() -> None:
 
         return model
 
+    # Log each run in csv files
     run_logger = ExperimentLogger(cfg.paths.logs_csv_path)
     next_run_id = run_logger.next_experiment_id()
     batch_noise_values = parse_batch_noise_std_options(args.batch_noise_std_options)

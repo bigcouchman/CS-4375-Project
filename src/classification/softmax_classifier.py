@@ -1,3 +1,4 @@
+# Softmax regression classifier logic for model
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
@@ -69,6 +70,7 @@ class SoftmaxClassifier:
 
         return (hidden @ self.layer_weights[-1]) + self.layer_biases[-1]
 
+    # Forward pass training for classifier
     def _forward_train(
         self,
         features: np.ndarray,
@@ -99,6 +101,7 @@ class SoftmaxClassifier:
         logits = (hidden @ self.layer_weights[-1]) + self.layer_biases[-1]
         return logits, layer_inputs, pre_activations, dropout_masks
 
+    # Loss and logit gradient calculation (backward pass)
     def _loss_and_grads(
         self,
         features: np.ndarray,
@@ -156,6 +159,7 @@ class SoftmaxClassifier:
             [grad.astype(np.float32) for grad in grad_biases],
         )
 
+    # Randomly shuffles through batches of data and gather their features and labels
     @staticmethod
     def _iterate_minibatches(
         features: np.ndarray,

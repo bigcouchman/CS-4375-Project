@@ -1,3 +1,4 @@
+# K fold cross validation logic, log performance metrics
 from __future__ import annotations
 
 import csv
@@ -13,7 +14,7 @@ from src.evaluation.visualize import save_denoising_grid
 
 from .trainer import compute_metrics, train_fold
 
-
+# Converting inputs to respective data types
 def _as_float(value: object, default: float = float("nan")) -> float:
     if isinstance(value, (float, int, np.floating, np.integer)):
         return float(value)
@@ -95,7 +96,7 @@ def _numpy_kfold_validation_indices(
     folds = np.array_split(sample_order, k_folds)
     return [np.asarray(fold, dtype=np.int64) for fold in folds]
 
-
+# Summarize performance metrics
 def _summarize_eval_folds(fold_results: list[dict[str, float]]) -> dict[str, float]:
     val_mse = np.asarray([row["val_mse"] for row in fold_results], dtype=np.float64)
     val_rmse = np.asarray([row["val_rmse"] for row in fold_results], dtype=np.float64)
@@ -125,7 +126,7 @@ def _summarize_eval_folds(fold_results: list[dict[str, float]]) -> dict[str, flo
 
     return summary
 
-
+# Print performance metrics
 def _print_kfold_eval_report(
     fold_results: list[dict[str, float]],
     summary: dict[str, float],
@@ -153,7 +154,7 @@ def _print_kfold_eval_report(
     if "val_ssim_mean" in summary and "val_ssim_std" in summary:
         print(f"SSIM mean+/-std: {summary['val_ssim_mean']:.6f} +/- {summary['val_ssim_std']:.6f}")
 
-
+# Log metrics in csv 
 def _write_kfold_eval_csv(
     output_csv_path: str | Path,
     fold_results: list[dict[str, float]],

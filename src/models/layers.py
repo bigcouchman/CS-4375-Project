@@ -1,3 +1,4 @@
+# Defining CDAE layers
 from __future__ import annotations
 
 import numpy as np
@@ -41,6 +42,7 @@ class Conv2D:
         self.grad_bias = np.zeros_like(self.bias)
         self._cached_input: np.ndarray | None = None
 
+    # Forward pass logic
     def forward(self, x: np.ndarray) -> np.ndarray:
         if x.ndim != 4:
             raise ValueError("Conv2D needs input with shape (N, H, W, C).")
@@ -76,6 +78,7 @@ class Conv2D:
         self._cached_input = x
         return output
 
+    # Backward pass to apply gradient descent
     def backward(self, grad_output: np.ndarray) -> np.ndarray:
         if self._cached_input is None:
             raise RuntimeError("Conv2D.backward called before forward.")
@@ -138,7 +141,7 @@ class Conv2D:
         self.weights -= learning_rate * grad_weights
         self.bias -= learning_rate * self.grad_bias
 
-
+# RELU activation 
 class ReLU:
     def __init__(self) -> None:
         self._mask: np.ndarray | None = None
@@ -152,7 +155,7 @@ class ReLU:
             raise RuntimeError("ReLU.backward called before forward.")
         return grad_output * self._mask
 
-
+# Sigmoid activation
 class Sigmoid:
     def __init__(self) -> None:
         self._output: np.ndarray | None = None

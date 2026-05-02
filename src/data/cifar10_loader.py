@@ -1,3 +1,4 @@
+# Fetching CIFAR-10 dataset
 from __future__ import annotations
 
 import pickle
@@ -38,7 +39,7 @@ TRAIN_BATCH_FILES = (
 )
 TEST_BATCH_FILE = "test_batch"
 
-
+# File loading function
 def _read_pickle(file_path: Path) -> dict[str, Any]:
     with file_path.open("rb") as file:
         with warnings.catch_warnings():
@@ -69,7 +70,7 @@ def _reshape_images(flat_images: np.ndarray) -> np.ndarray:
 def _required_batch_paths(extracted_dir: Path) -> list[Path]:
     return [extracted_dir / name for name in TRAIN_BATCH_FILES + (TEST_BATCH_FILE,)]
 
-
+# Load CIFAR-10 fby fetching archive
 def _download_and_extract_official_python_version(dataset_root: Path) -> Path:
     archive_path = dataset_root / CIFAR10_ARCHIVE_NAME
     extracted_dir = dataset_root / CIFAR10_EXTRACTED_DIR

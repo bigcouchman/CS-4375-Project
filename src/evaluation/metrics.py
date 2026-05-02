@@ -1,8 +1,9 @@
+# Metrics for autoencoder performance
 from __future__ import annotations
 
 import numpy as np
 
-
+# Different between predicted output and actual output (Mean squared error)
 def mse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean((y_true - y_pred) ** 2))
 
@@ -10,14 +11,15 @@ def mse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.sqrt(mse(y_true, y_pred)))
 
-
+# Next 2 functions cover quality of denoised image from autoencoder
+# peak signal to noise ratio calculation
 def psnr(y_true: np.ndarray, y_pred: np.ndarray, max_pixel: float = 1.0) -> float:
     current_mse = mse(y_true, y_pred)
     if current_mse == 0:
         return float("inf")
     return float(20.0 * np.log10(max_pixel) - 10.0 * np.log10(current_mse))
 
-
+# self similarity index measure for 1D mapping
 def _ssim_1d(x: np.ndarray, y: np.ndarray, c1: float, c2: float) -> float:
     mu_x = float(np.mean(x, dtype=np.float64))
     mu_y = float(np.mean(y, dtype=np.float64))
@@ -36,7 +38,7 @@ def _ssim_1d(x: np.ndarray, y: np.ndarray, c1: float, c2: float) -> float:
         return 1.0
     return float(numerator / denominator)
 
-
+# Overal self similarity index measure
 def ssim(y_true: np.ndarray, y_pred: np.ndarray, max_pixel: float = 1.0) -> float:
     if y_true.shape != y_pred.shape:
         raise ValueError("y_true and y_pred has to have the same shapes for SSIM.")

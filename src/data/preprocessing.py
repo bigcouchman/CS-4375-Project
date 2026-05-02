@@ -1,3 +1,4 @@
+# Image preprocesing logic
 from __future__ import annotations
 
 import numpy as np
@@ -6,7 +7,7 @@ import numpy as np
 def normalize_images(images: np.ndarray) -> np.ndarray:
     return images.astype(np.float32) / 255.0
 
-
+# Get random subsets of images for training and testing
 def select_random_subset(
     images: np.ndarray,
     labels: np.ndarray,
@@ -24,7 +25,7 @@ def select_random_subset(
     indices = rng.choice(images.shape[0], size=sample_count, replace=False)
     return images[indices], labels[indices]
 
-
+# Image resizing
 def resize_images(images: np.ndarray, target_size: int) -> np.ndarray:
     if images.ndim != 4:
         raise ValueError("images has to have shape (N, H, W, C).")

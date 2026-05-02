@@ -1,3 +1,4 @@
+# Produce graphs of autoencoder performance
 from __future__ import annotations
 
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-
+# Grids tracking denoising and MSE for image batches
 def save_denoising_grid(
     clean_images: np.ndarray,
     noisy_images: np.ndarray,
